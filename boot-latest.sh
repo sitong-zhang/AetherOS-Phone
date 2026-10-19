@@ -20,7 +20,7 @@ REPO="sitong-zhang/AetherOS-Phone"
 DL="https://github.com/$REPO/releases/download"
 API="https://api.github.com/repos/$REPO/releases/latest"
 PKG="aetheros-phone.tar.gz"
-FALLBACK="phone-v4"   # 探测失败时的兜底版本
+FALLBACK="phone-v5"   # 探测失败时的兜底版本
 WORK="${AETHER_HOME:-$HOME/aetheros}"
 
 # ---- 下载器：curl 优先，坏/缺则 wget 兜底 ----
@@ -93,5 +93,5 @@ fi
 
 echo "[aether] 启动 AetherOS $LATEST（TCG 软件模拟，首次约 1-3 分钟）"
 echo "[aether] 画面: VNC 查看器(推荐 AVNC) 连 127.0.0.1:5900 | 退出: Ctrl-A 再按 X"
-echo "[aether] 交互: 数字键 1-9 或【手指点击 Launcher 应用行】启动应用"
+echo "[aether] 交互: 先【点按屏幕任意处解锁】-> 再点按启动器应用行(或数字键 1-9)启动应用"
 exec sh "$WORK/phone-boot.sh"
