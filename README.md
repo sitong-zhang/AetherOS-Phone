@@ -9,6 +9,19 @@
 窗口为 **iOS 风格液态玻璃**（背景实时模糊 + 边缘折射 + 镜面高光，CPU 软件
 渲染），并带 **安卓兼容层**：把真机电量/充电/Wi-Fi/通知经 HAL 后端喂给系统。
 
+## 一条命令：自动安装并运行最新版
+
+Termux 里执行这一行，它会**自动探测 GitHub 最新 release、下载、解包并启动**——永远跑最新版（将来出 phone-v4/v5 也照跑）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/boot-latest.sh | sh
+```
+
+- 自动探测最新版本 → 下载镜像（约 20MB）→ 解压 → 前台启动
+- 启动后用 AVNC（VNC 查看器）连 `127.0.0.1:5900`
+- 交互：数字键 **1-9** 或 **手指点击 Launcher 应用行** = 启动对应应用
+- 退出：Ctrl-A 再按 X；低内存手机：`AETHER_MEM=384M AETHER_SMP=1` 前缀同一行
+
 ## 一行安装（手机 Termux）
 
 ```sh
