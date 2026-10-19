@@ -13,7 +13,7 @@ set -e
 REPO="sitong-zhang/AetherOS-Phone"
 API="https://api.github.com/repos/${REPO}/releases/latest"
 ASSET="aetheros-phone.tar.gz"
-FALLBACK="phone-v5"   # 探测失败时的兜底版本（诚实降级：可能不是最新版）
+FALLBACK="phone-v6"   # 探测失败时的兜底版本（诚实降级：可能不是最新版）
 DEST="${AETHEROS_HOME:-$HOME/aetheros}"
 RUN=1
 

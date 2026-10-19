@@ -20,7 +20,7 @@ REPO="sitong-zhang/AetherOS-Phone"
 DL="https://github.com/$REPO/releases/download"
 API="https://api.github.com/repos/$REPO/releases/latest"
 PKG="aetheros-phone.tar.gz"
-FALLBACK="phone-v5"   # 探测失败时的兜底版本
+FALLBACK="phone-v6"   # 探测失败时的兜底版本
 WORK="${AETHER_HOME:-$HOME/aetheros}"
 
 # ---- 下载器：curl 优先，坏/缺则 wget 兜底 ----
@@ -94,4 +94,23 @@ fi
 echo "[aether] 启动 AetherOS $LATEST（TCG 软件模拟，首次约 1-3 分钟）"
 echo "[aether] 画面: VNC 查看器(推荐 AVNC) 连 127.0.0.1:5900 | 退出: Ctrl-A 再按 X"
 echo "[aether] 交互: 先【点按屏幕任意处解锁】-> 再点按启动器应用行(或数字键 1-9)启动应用"
-exec sh "$WORK/phone-boot.sh"
+
+# 默认后台跑：Termux 不留半屏内核日志，AVNC 全屏就是一整部手机。
+# 要看串口日志：AETHER_LOGS=1 前缀同一条命令（前台滚动）。
+if [ "${AETHER_LOGS:-0}" = "1" ]; then
+    exec sh "$WORK/phone-boot.sh"
+fi
+
+LOG="$WORK/aetheros-boot.log"
+echo "[aether] 后台启动中（日志: $LOG）..."
+nohup sh "$WORK/phone-boot.sh" > "$LOG" 2>&1 &
+sleep 8
+if ps -A 2>/dev/null | grep -q "[q]emu-system-aarch64"; then
+    echo "[aether] 已启动。现在打开 AVNC 连 127.0.0.1:5900，把画面设为『填满屏幕』"
+    echo "[aether] 你会先看到锁屏（大时钟 + 日期 + 锁图标）——点按屏幕任意处解锁"
+    echo "[aether] 停止: pkill qemu-system-aarch64 | 日志: tail -f $LOG"
+else
+    echo "[aether] 启动失败，日志尾部 20 行："
+    tail -20 "$LOG" 2>/dev/null
+    exit 1
+fi

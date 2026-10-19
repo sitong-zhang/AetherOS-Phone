@@ -1,13 +1,18 @@
 # AetherOS-Phone
 
 [![Release](https://img.shields.io/github/v/release/sitong-zhang/AetherOS-Phone?label=release)](https://github.com/sitong-zhang/AetherOS-Phone/releases)
-[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v5/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v5/aetheros-phone.tar.gz)
+[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v6/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v6/aetheros-phone.tar.gz)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 在安卓手机上通过 **Termux + QEMU** 纯软件模拟运行完整 AetherOS：
 真实 ARM64 Linux 6.6.70 内核 + 独立用户态，无需 root / 无需解锁 bootloader。
-窗口为 **iOS 风格液态玻璃**（背景实时模糊 + 边缘折射 + 镜面高光，CPU 软件
-渲染），并带 **安卓兼容层**：把真机电量/充电/Wi-Fi/通知经 HAL 后端喂给系统。
+
+**它是一部手机，不是一个窗口**：默认**竖屏 720×1600**（1080×2400 手机的原生
+9:20 比例），VNC 里铺满整块屏幕；开机先是**锁屏**（大时钟 + 中文日期 + 电量 +
+锁图标），点按解锁进**应用网格主屏**；桌面是**实拍照片壁纸**，界面用
+**iOS 风格液态玻璃**（背景实时模糊 + 边缘折射 + 镜面高光，参数直接取自
+Kyant0/AndroidLiquidGlass 上游配方，CPU 软件渲染），并带 **安卓兼容层**：
+把真机电量/充电/Wi-Fi/通知经 HAL 后端喂给系统。
 
 ## 一条命令：自动安装并运行最新版
 
@@ -44,7 +49,7 @@ curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/downlo
 ```sh
 pkg install qemu-system-aarch64-headless   # 主仓库正确包名（二进制仍叫 qemu-system-aarch64）
 mkdir -p ~/aetheros && cd ~/aetheros
-curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v5/aetheros-phone.tar.gz
+curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v6/aetheros-phone.tar.gz
 tar xzf aetheros-phone.tar.gz
 ./phone-boot.sh
 ```
@@ -69,9 +74,26 @@ AetherOS 是一个从零构建的移动操作系统（ARM64 Linux 内核 + 独�
 
 ## 发布说明
 
-镜像详见 Releases 页的 `phone-v5`。
+镜像详见 Releases 页的 `phone-v6`。
 
-**phone-v5**（2026-10-20 · 锁屏开机 + 真应用 + 液态玻璃底层化）：
+**phone-v6**（2026-10-20 · 手机形态：竖屏铺满 + 照片壁纸 + 应用网格）：
+
+- **竖屏 720×1600**：1080×2400 手机的原生 9:20 比例，VNC 里铺满整块屏幕——
+  不再是「显示器里的小窗口」；默认后台启动 QEMU，Termux 不占半屏
+  （`AETHER_LOGS=1` 才前台滚日志）；`AETHER_RES=` 可换分辨率
+- **实拍照片壁纸**（山景）：玻璃的模糊/折射/色差终于有内容可扭曲。顺带修掉
+  一个真实 bug——玻璃面板的像素上界卡在 1280×800，竖屏超限后静默降级成
+  「纯色块」（整屏被刷成面板染色），是新增的竖屏冒烟抓到的
+- **主屏改成应用网格**：圆角图标块 + 字母标识 + 名称（竖屏 3 列），
+  不再是文字行列表
+- **看门狗冻结盲区修复**：init 重启服务后数秒内被 SIGSTOP 冻结时，旧逻辑因
+  「新 pid 尚未完成首次成功心跳」白放整个 120s 启动宽限；现按 /proc 调度
+  状态识别「冻结 ≠ 慢启动」，照常 3-miss 处决
+- **一键安装器修复**：`install-termux.sh` 此前写死 `phone-v3`（下载的
+  一直是旧镜像），改为三级探测最新 release；raw.githubusercontent.com
+  （国内常被 reset）全部换 github.com
+
+**phone-v5**（2026-10-19 · 锁屏开机 + 真应用 + 液态玻璃底层化）：
 
 - **开机即锁屏**：全屏系统层液态玻璃面板（大时钟 + 中文日期 + 电量 + 锁图标），
   点按任意处解锁进启动器——与真手机开机语义一致
