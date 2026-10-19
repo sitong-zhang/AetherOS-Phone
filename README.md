@@ -1,7 +1,7 @@
 # AetherOS-Phone
 
 [![Release](https://img.shields.io/github/v/release/sitong-zhang/AetherOS-Phone?label=release)](https://github.com/sitong-zhang/AetherOS-Phone/releases)
-[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v2/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v2/aetheros-phone.tar.gz)
+[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v3/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v3/aetheros-phone.tar.gz)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 在安卓手机上通过 **Termux + QEMU** 纯软件模拟运行完整 AetherOS：
@@ -25,7 +25,7 @@ curl -sL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/inst
 ```sh
 pkg install qemu-system-aarch64-headless   # 主仓库正确包名（二进制仍叫 qemu-system-aarch64）
 mkdir -p ~/aetheros && cd ~/aetheros
-curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v2/aetheros-phone.tar.gz
+curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v3/aetheros-phone.tar.gz
 tar xzf aetheros-phone.tar.gz
 ./phone-boot.sh
 ```
@@ -50,7 +50,7 @@ AetherOS 是一个从零构建的移动操作系统（ARM64 Linux 内核 + 独�
 
 ## 发布说明
 
-镜像详见 Releases 页的 `phone-v2`。
+镜像详见 Releases 页的 `phone-v3`。。
 
 ## 诚实边界
 

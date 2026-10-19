@@ -8,7 +8,7 @@
 set -e
 
 REPO="sitong-zhang/AetherOS-Phone"
-REL="phone-v2"
+REL="phone-v3"
 ASSET="aetheros-phone.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/download/${REL}/${ASSET}"
 DEST="${AETHEROS_HOME:-$HOME/aetheros}"
