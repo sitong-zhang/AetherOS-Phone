@@ -1,13 +1,14 @@
 #!/bin/sh
 # boot-latest.sh —— 一条命令「装 + 跑」最新版 AetherOS。
 #
-# 自动探测 GitHub 最新 release（不写死版本号：将来出 phone-v4/v5 也照跑），
+# 自动探测 GitHub 最新 release（不写死版本号：将来出 phone-v5/v6 也照跑），
 # 下载镜像包 -> 解包 ->（缺 QEMU 则自动装）-> 启动。永远拿「最新版」。
 #
 # 用法（Termux，或任何带 sh + curl/wget + tar + qemu-system-aarch64 的 Linux）：
-#   curl -fsSL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/boot-latest.sh | sh
-#   # curl 坏时用 wget 版：
-#   wget -qO- https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/boot-latest.sh | sh
+#   # 首选（github.com 域名；raw.githubusercontent.com 在国内网络常被 reset）：
+#   curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh | sh
+#   # curl 坏时用 wget 版（同一 URL）：
+#   wget -qO- https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh | sh
 #
 # 可选环境变量：
 #   AETHER_MEM=384M   低内存手机（3GB 以下）调小内存
@@ -43,9 +44,27 @@ mkdir -p "$WORK"
 cd "$WORK"
 echo "[aether] 工作目录: $WORK"
 
+# ---- 探测最新 release 的 tag（不写死版本号）----
+# 三级探测，逐级降级（国内网络常见 raw/api 域名被 reset）：
+#   1) api.github.com 的 JSON（最快、信息全）；
+#   2) github.com 的 /releases/latest 302 重定向目标（跟到底即 tag 名，
+#      不依赖 api 域名——raw/api 被墙时这条路仍然通）；
+#   3) 都失败 -> FALLBACK 硬编码兜底（诚实降级：可能不是最新版）。
 echo "[aether] 探测最新 release ..."
 LATEST=$(GET "$API" 2>/dev/null \
   | sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' | head -n1 || true)
+if [ -z "$LATEST" ]; then
+    if [ "$FETCHER" = curl ]; then
+        LATEST=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+                 "https://github.com/$REPO/releases/latest" 2>/dev/null \
+                 | sed -n 's|.*/releases/tag/||p' | head -n1 || true)
+    else
+        LATEST=$(wget -S --max-redirect=0 --tries=1 \
+                 "https://github.com/$REPO/releases/latest" 2>&1 \
+                 | tr -d '\r' \
+                 | sed -n 's|^ *Location: .*/releases/tag/||p' | head -n1 || true)
+    fi
+fi
 [ -n "$LATEST" ] || { echo "[aether] 探测失败，回退 $FALLBACK"; LATEST="$FALLBACK"; }
 echo "[aether] 最新版 = $LATEST"
 

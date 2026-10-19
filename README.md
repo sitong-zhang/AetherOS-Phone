@@ -11,11 +11,15 @@
 
 ## 一条命令：自动安装并运行最新版
 
-Termux 里执行这一行，它会**自动探测 GitHub 最新 release、下载、解包并启动**——永远跑最新版（将来出 phone-v4/v5 也照跑）：
+Termux 里执行这一行，它会**自动探测 GitHub 最新 release、下载、解包并启动**——永远跑最新版（将来出 phone-v5/v6 也照跑）：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/boot-latest.sh | sh
+curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh | sh
 ```
+
+> 用 **github.com 域名**而不是 raw.githubusercontent.com——后者在国内网络
+> 常被连接重置（`curl: (35) Recv failure: Connection reset by peer`）。
+> curl 坏时用 wget 版（同一 URL）：`wget -qO- <同一URL> | sh`
 
 - 自动探测最新版本 → 下载镜像（约 20MB）→ 解压 → 前台启动
 - 启动后用 AVNC（VNC 查看器）连 `127.0.0.1:5900`
@@ -25,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/bo
 ## 一行安装（手机 Termux）
 
 ```sh
-curl -sL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/install-termux.sh | sh
+curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/install-termux.sh | sh
 ```
 
 脚本会自动：装依赖 → 下载镜像（约 20MB）→ 解压 → 后台启动 → 打印连接信息。
