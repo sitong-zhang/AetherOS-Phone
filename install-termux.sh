@@ -8,7 +8,7 @@
 set -e
 
 REPO="sitong-zhang/AetherOS-Phone"
-REL="phone-v1"
+REL="phone-v2"
 ASSET="aetheros-phone.tar.gz"
 BASE_URL="https://github.com/${REPO}/releases/download/${REL}/${ASSET}"
 DEST="${AETHEROS_HOME:-$HOME/aetheros}"
@@ -24,9 +24,14 @@ echo "    安装目录: ${DEST}"
 
 # ---------- 1. 安装依赖 ----------
 if command -v pkg >/dev/null 2>&1; then
-  echo "==> [Termux] 安装 qemu-system-aarch64 / curl / tar"
+  echo "==> [Termux] 安装 qemu-system-aarch64-headless / curl / tar"
   pkg update -y >/dev/null 2>&1
-  pkg install -y qemu-system-aarch64 curl tar
+  # 注意: 主仓库里正确的包名是 -headless（装出的二进制仍叫
+  # qemu-system-aarch64）; 裸名 qemu-system-aarch64 在 x11-repo 才有。
+  pkg install -y qemu-system-aarch64-headless curl tar
+  # 可选: Android 宿主 HAL（真机电量/网络）。装上则状态栏显示真实读数，
+  # 失败不影响系统运行（自动退化为 sysfs 电量或 bat --）。
+  pkg install -y termux-api >/dev/null 2>&1 || true
 elif command -v apt-get >/dev/null 2>&1; then
   echo "==> [Debian/Ubuntu] 安装 qemu-system-arm / curl / tar"
   sudo apt-get update -y >/dev/null 2>&1
