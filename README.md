@@ -1,7 +1,7 @@
 # AetherOS-Phone
 
 [![Release](https://img.shields.io/github/v/release/sitong-zhang/AetherOS-Phone?label=release)](https://github.com/sitong-zhang/AetherOS-Phone/releases)
-[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v3/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v3/aetheros-phone.tar.gz)
+[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v4/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v4/aetheros-phone.tar.gz)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 在安卓手机上通过 **Termux + QEMU** 纯软件模拟运行完整 AetherOS：
@@ -38,7 +38,7 @@ curl -sL https://raw.githubusercontent.com/sitong-zhang/AetherOS-Phone/main/inst
 ```sh
 pkg install qemu-system-aarch64-headless   # 主仓库正确包名（二进制仍叫 qemu-system-aarch64）
 mkdir -p ~/aetheros && cd ~/aetheros
-curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v3/aetheros-phone.tar.gz
+curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v4/aetheros-phone.tar.gz
 tar xzf aetheros-phone.tar.gz
 ./phone-boot.sh
 ```
@@ -63,7 +63,12 @@ AetherOS 是一个从零构建的移动操作系统（ARM64 Linux 内核 + 独�
 
 ## 发布说明
 
-镜像详见 Releases 页的 `phone-v3`。。
+镜像详见 Releases 页的 `phone-v4`。
+
+**phone-v4**（2026-10-19 · 看门狗误杀修复）：修复慢速手机（纯软件模拟冷启动慢）上
+合成器被看门狗反复误判僵死、处决重启的死循环——新进程启动宽限期（首次成功心跳前
+不计 miss，120s 封顶，内核命令行 `aether_wdt_grace=` 可调）、心跳超时 2s→5s、
+合成器提前绑定 IPC socket。CI 92 项启动断言全绿（含触摸端到端 T2）。
 
 ## 诚实边界
 

@@ -19,7 +19,7 @@ REPO="sitong-zhang/AetherOS-Phone"
 DL="https://github.com/$REPO/releases/download"
 API="https://api.github.com/repos/$REPO/releases/latest"
 PKG="aetheros-phone.tar.gz"
-FALLBACK="phone-v3"   # 探测失败时的兜底版本
+FALLBACK="phone-v4"   # 探测失败时的兜底版本
 WORK="${AETHER_HOME:-$HOME/aetheros}"
 
 # ---- 下载器：curl 优先，坏/缺则 wget 兜底 ----
