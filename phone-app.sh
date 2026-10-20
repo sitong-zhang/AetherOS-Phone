@@ -61,7 +61,7 @@ mkdir -p "$HOME_DIR"
 cd "$HOME_DIR"
 
 # ---- 下载 App 包（server.py + 前端；永远最新版）----
-if [ -x "$HOME_DIR/app/server.py" ] && [ "$1" != "--reinstall" ]; then
+if [ -f "$HOME_DIR/app/server.py" ] && [ "${1:-}" != "--reinstall" ]; then
     echo "[aether] App 已存在，跳过下载（如需重装: sh $HOME_DIR/phone-app.sh --reinstall）"
 else
     echo "[aether] 下载 App 包 $APP_PKG ..."
@@ -102,10 +102,14 @@ if ! command -v qemu-system-aarch64 >/dev/null 2>&1; then
     fi
 fi
 
-# ---- 端口占用检查：8080 被占则顺延 ----
-if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | grep -q ":$PORT "; then
-    echo "[aether] 端口 $PORT 被占用，顺延到 8081 ..."
-    PORT=8081
+# ---- 端口占用检查：顺延到第一个空闲端口（8080 起，最多试到 8099）----
+if command -v ss >/dev/null 2>&1; then
+    _tries=0
+    while ss -ltn 2>/dev/null | grep -q ":$PORT " && [ "$_tries" -lt 100 ]; do
+        if [ "$PORT" -eq 8080 ]; then echo "[aether] 端口 8080 被占用，顺延中 ..."; fi
+        PORT=$((PORT+1)); _tries=$((_tries+1))
+    done
+    [ "$PORT" -ne 8080 ] && echo "[aether] 最终选用端口: $PORT"
 fi
 
 # ---- 后台启动服务 ----
