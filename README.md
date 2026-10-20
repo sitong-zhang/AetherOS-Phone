@@ -1,7 +1,7 @@
 # AetherOS-Phone
 
 [![Release](https://img.shields.io/github/v/release/sitong-zhang/AetherOS-Phone?label=release)](https://github.com/sitong-zhang/AetherOS-Phone/releases)
-[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v6/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v6/aetheros-phone.tar.gz)
+[![Image size](https://img.shields.io/github/download-size/sitong-zhang/AetherOS-Phone/phone-v7/aetheros-phone.tar.gz?label=image%20size)](https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v7/aetheros-phone.tar.gz)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 在安卓手机上通过 **Termux + QEMU** 纯软件模拟运行完整 AetherOS：
@@ -14,19 +14,44 @@
 Kyant0/AndroidLiquidGlass 上游配方，CPU 软件渲染），并带 **安卓兼容层**：
 把真机电量/充电/Wi-Fi/通知经 HAL 后端喂给系统。
 
-## 一条命令：自动安装并运行最新版
+## 独立 App（推荐）：终端里装、App 里看
 
-Termux 里执行这一行，它会**自动探测 GitHub 最新 release、下载、解包并启动**——永远跑最新版（将来出 phone-v5/v6 也照跑）：
+不再需要「Termux 看串口 + 单独开 VNC 查看器」。Termux 里跑这一条，
+它自动装好 App 服务并打开——**先是终端界面，点「运行」自动装系统，
+系统直接在这个 App 里显示**，点按屏幕解锁、点按启动器行启动应用：
 
 ```sh
-curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh | sh
+curl -fsSL "https://gh-proxy.com/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/phone-app.sh" | sh
 ```
 
-> 用 **github.com 域名**而不是 raw.githubusercontent.com——后者在国内网络
-> 常被连接重置（`curl: (35) Recv failure: Connection reset by peer`）。
-> curl 坏时用 wget 版（同一 URL）：`wget -qO- <同一URL> | sh`
+> 备用镜像入口（上面不通时依次换）：
+> `curl -fsSL "https://ghfast.top/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/phone-app.sh" | sh`
+> ／ `curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/phone-app.sh | sh`
 
-- 自动探测最新版本 → 下载镜像（约 20MB）→ 解压 → 前台启动
+- 打开 `http://127.0.0.1:8080`：**终端面板**（实时滚动安装/内核日志 + 命令行）→ 点「**运行**」→ 自动下载最新系统镜像并启动 → 自动切到**系统画面**（内嵌 VNC 显示器，可触摸点按 + 键盘）
+- 浏览器里「**添加到主屏幕**」即成为独立 App；也可装 `aetheros-phone-app.apk`（全屏 WebView 壳，自动探测 8080/8081/8082 端口，服务没起时显示中文帮助页）
+- 换端口：`AETHER_PORT=8081`；低内存：`AETHER_MEM=384M AETHER_SMP=1`；日志：`tail -f ~/aetheros-app/server.log`
+- 停止服务：`kill $(ss -ltnp | grep ':8080 ' | grep -oP 'pid=\K[0-9]')`
+
+## 一条命令：自动安装并运行最新版（传统方式）
+
+Termux 里执行这一行，它会**自动探测 GitHub 最新 release、下载、解包并启动**——永远跑最新版（将来出 phone-v7/v8 也照跑）：
+
+```sh
+curl -fsSL "https://gh-proxy.com/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh" | sh
+```
+
+> **国内网络可直接用上面这条**：脚本内置「直连 GitHub → gh-proxy.com 反代 →
+> ghfast.top 反代」多通道自动兜底，哪个通就用哪个——Termux 里直连
+> `github.com:443` 常被 TCP 阻断（`curl: (28) Failed to connect` / `(35)` reset）
+> 也能装。上面这条用镜像入口拉脚本，最稳。
+>
+> - 备用镜像入口：`curl -fsSL "https://ghfast.top/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh" | sh`
+> - 直连（仅网络通畅时）：`curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/boot-latest.sh | sh`
+> - curl 坏时用 wget 版（同一 URL）：`wget -qO- "<同一URL>" | sh`
+> - 三个通道都连不上时，设代理再跑：`export ALL_PROXY=socks5://127.0.0.1:1080`（手机 VPN 本地端口）或 `http://127.0.0.1:7890`
+
+- 自动探测最新版本 → 多通道下载镜像（约 20MB）→ 解压 → 前台启动
 - 启动后用 AVNC（VNC 查看器）连 `127.0.0.1:5900`
 - 交互：**先点按屏幕任意处解锁**（开机是锁屏），再**点按启动器应用行**或数字键
   **1-9** 启动对应应用
@@ -35,7 +60,7 @@ curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/downlo
 ## 一行安装（手机 Termux）
 
 ```sh
-curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/install-termux.sh | sh
+curl -fsSL "https://gh-proxy.com/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/install-termux.sh" | sh
 ```
 
 脚本会自动：装依赖 → 下载镜像（约 20MB）→ 解压 → 后台启动 → 打印连接信息。
@@ -49,7 +74,7 @@ curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/downlo
 ```sh
 pkg install qemu-system-aarch64-headless   # 主仓库正确包名（二进制仍叫 qemu-system-aarch64）
 mkdir -p ~/aetheros && cd ~/aetheros
-curl -L -o aetheros-phone.tar.gz https://github.com/sitong-zhang/AetherOS-Phone/releases/download/phone-v6/aetheros-phone.tar.gz
+curl -L -o aetheros-phone.tar.gz "https://gh-proxy.com/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/aetheros-phone.tar.gz"
 tar xzf aetheros-phone.tar.gz
 ./phone-boot.sh
 ```
@@ -72,9 +97,33 @@ AetherOS 是一个从零构建的移动操作系统（ARM64 Linux 内核 + 独�
 | `aether-android-bridge.sh` | 安卓宿主 HAL 桥接（真机电量/网络 -> 客户机） |
 | `README-phone.md` | 完整使用说明 |
 
+phone-v7 起随 release 发布的 App 资产（不在镜像包内）：
+
+| 文件 | 说明 |
+|---|---|
+| `phone-app.sh` | App 一键启动脚本（永远拉最新版） |
+| `aether-phone-app.tar.gz` | App 包：`server.py` 桥接服务 + 前端（终端面板 + 内嵌 VNC 显示器） |
+| `aetheros-phone-app.apk` | Android WebView 套壳 APK（源码在 `apk-src/`，`build-phone-app-apk.sh` 复现构建） |
+
 ## 发布说明
 
-镜像详见 Releases 页的 `phone-v6`。
+镜像详见 Releases 页的 `phone-v7`。
+
+**phone-v7**（2026-10-20 · 独立 App：终端里装、App 里看）：
+
+- **全新 App 形态**：`phone-app.sh` 一条命令拉起本地服务（纯 Python 标准库，
+  零第三方依赖）——打开先是**终端面板**（SSE 实时滚动安装/内核串口日志），
+  点「运行」自动下载最新系统镜像并启动 QEMU，随后自动切到**内嵌 VNC 显示器**，
+  系统直接在这个 App 里显示；彻底告别「Termux 看串口 + 单独开 AVNC」的割裂流程
+- **手写 websockify + 最小 RFB 3.8 客户端**：服务端手写 RFC6455 帧编解码把
+  浏览器 WebSocket 桥到 QEMU VNC（127.0.0.1:5900）；前端直接解 VNC 协议
+  （raw 编码、32bpp truecolor），触摸 PointerEvent + KeyEvent 全交互
+- **真 · Android APK**：`aetheros-phone-app.apk` 全屏 WebView 套壳
+  （竖屏锁定、沉浸式、端口自动探测 8080/8081/8082），服务未启动时显示
+  中文帮助页；`build-phone-app-apk.sh` 可从 `apk-src/` 一键复现构建
+- **PWA**：可「添加到主屏幕」当独立 App 用（standalone + portrait + 缓存外壳）
+- **永远最新**：`releases/latest/download` + 三级镜像兜底
+  （gh-proxy.com → ghfast.top → 直连），国内网络可直接装
 
 **phone-v6**（2026-10-20 · 手机形态：竖屏铺满 + 照片壁纸 + 应用网格）：
 
