@@ -42,7 +42,7 @@ jobs:
         env:
           ROOT: ${{ runner.temp }}/rootfs
           IMG: ${{ runner.temp }}/aetheros-rootfs.ext4
-        run: ./make_rootfs.sh
+        run: bash ./make_rootfs.sh
 
       - name: QEMU 启动冒烟（断言链）
         run: |
