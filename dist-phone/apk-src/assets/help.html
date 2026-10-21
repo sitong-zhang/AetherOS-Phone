@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>AetherOS</title>
+<style>
+  body{background:#05070d;color:#c9d6ff;font-family:sans-serif;margin:0;padding:28px 22px;line-height:1.7}
+  h1{font-size:22px;color:#8fb0ff;margin:0 0 6px}
+  .sub{color:#5b6b8f;font-size:13px;margin-bottom:22px}
+  .card{background:#0d1322;border:1px solid #1c2740;border-radius:14px;padding:16px 18px;margin-bottom:14px}
+  .card h2{font-size:15px;color:#9fb4ff;margin:0 0 8px}
+  code{background:#111a2e;border:1px solid #22304f;border-radius:8px;padding:10px 12px;display:block;
+       color:#7ee2a8;font-size:12px;word-break:break-all;white-space:pre-wrap;user-select:all}
+  .reason{color:#ff8f8f;font-size:12px;margin-bottom:14px}
+  .step{color:#8fa3c8;font-size:13px}
+</style>
+</head>
+<body>
+<h1>AetherOS</h1>
+<div class="sub">手机上的真 · ARM64 操作系统</div>
+<div class="reason">未连接到本地 App 服务（%REASON%）</div>
+<div class="card">
+  <h2>一步启动</h2>
+  <div class="step">在 Termux 中粘贴运行下面这条命令，它会自动安装最新版系统并启动 App 服务；启动后回到本 App 即可看到终端界面，点「运行」装系统，系统直接在这里显示。</div>
+  <code>curl -fsSL "https://gh-proxy.com/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/phone-app.sh" | sh</code>
+</div>
+<div class="card">
+  <h2>镜像备用</h2>
+  <div class="step">上面命令下载不通时，依次换这两条：</div>
+  <code>curl -fsSL "https://ghfast.top/https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/phone-app.sh" | sh</code>
+  <code>curl -fsSL https://github.com/sitong-zhang/AetherOS-Phone/releases/latest/download/phone-app.sh | sh</code>
+</div>
+<div class="card">
+  <h2>启动成功后</h2>
+  <div class="step">下拉通知栏或返回本 App，屏幕会显示「终端界面」→ 点运行 → 自动下载并启动系统 → 自动切到系统画面，点按屏幕解锁即可使用。</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,20 @@
+# ============================================================
+# Git LFS 纳入规则
+# 仅纳入「无法从本仓库源码重建」的大二进制：
+#   - ARM64 Linux 内核镜像（无内核源码/构建脚本）
+#   - initramfs（无重建脚本）
+#   - Android 宿主内的 QEMU 动态库闭包（28 个 .so）
+#   - 自包含终端 APK
+# 其余产物（用户态静态 ELF、rootfs.ext4、busybox、APK 源等）均可重建，不进 LFS。
+# ============================================================
+
+# 内核镜像（两个 .Image 同名变体均匹配）
+*.Image                                         filter=lfs diff=lfs merge=lfs -text
+*.cpio.gz                                       filter=lfs diff=lfs merge=lfs -text
+
+# 壁纸源资源（PPM 约 3.5MB，rootfs 构建需要）
+assets/*.ppm                                    filter=lfs diff=lfs merge=lfs -text
+
+# 手机端：QEMU 动态库闭包 + 终端 APK（均不可重建）
+dist-phone/terminal-apk/lib/**/*.so             filter=lfs diff=lfs merge=lfs -text
+dist-phone/terminal-apk/*.apk                   filter=lfs diff=lfs merge=lfs -text

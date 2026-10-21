@@ -1,0 +1,55 @@
+name: aether-linux build
+
+# 交叉编译 + 工件断言 + 宿主 IPC 契约冒烟（不依赖 QEMU，秒级反馈）。
+# 守护的纪律：产物必须是「真 ARM64 静态 ELF」，IPC 契约必须与
+# AETHEROSD-PROTOCOL.md 逐条相符——CI 红即止，不放宽。
+on:
+  push:
+  pull_request:
+
+jobs:
+  cross-compile:
+    name: 交叉编译 + 工件断言 + 宿主 IPC 契约
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装交叉工具链
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu file binutils
+
+      - name: 交叉编译 aether-init（aarch64 静态 ELF）
+        run: |
+          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c
+
+      - name: 交叉编译 aetherosd（aarch64 静态 ELF）
+        run: |
+          aarch64-linux-gnu-gcc -static -O2 -Wall \
+            -DAETHEROS_BUILD='"ci"' -o aetherosd-aarch64-static aetherosd.c
+
+      - name: 交叉编译 aether-compositor（aarch64 静态 ELF，P0-6 图形栈）
+        run: |
+          aarch64-linux-gnu-gcc -static -O2 -Wall -Wextra -I. \
+            -o aether-compositor \
+            aether-compositor.c aether-drm.c aether-render.c
+
+      - name: 宿主编译 aetherosd（IPC 契约冒烟用，x86-64）
+        run: |
+          gcc -O2 -Wall -DAETHEROS_BUILD='"ci"' -o aetherosd-host aetherosd.c
+
+      - name: 断言工件为 ARM64 静态 ELF
+        run: ci/check-artifacts.sh aether-init-aarch64 aetherosd-aarch64-static aether-compositor
+
+      # 宿主侧真 UDS + 真 JSON 契约：负例/权限/字段/活数据/退出清理全链断言。
+      # aarch64 产物在 QEMU 内的覆盖由 boot-smoke.yml 负责。
+      - name: 宿主 UDS IPC 契约冒烟
+        run: ci/ipc-contract-smoke.sh "$GITHUB_WORKSPACE/aetherosd-host" "$RUNNER_TEMP/ipc-smoke"
+
+      - name: 上传 IPC 冒烟日志
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ipc-smoke-logs
+          path: |
+            ${{ RUNNER_TEMP }}/ipc-smoke/daemon.log

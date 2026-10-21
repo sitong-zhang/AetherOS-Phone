@@ -1,0 +1,60 @@
+name: aether-linux boot smoke
+
+# 真机级冒烟：busybox 交叉编译 -> rootfs 构建 -> QEMU 启动 -> 严格断言链。
+# 断言链覆盖：PID1 身份、服务拓扑、IPC 准入与契约、9p 共享、崩溃自恢复、
+# 优雅停机（QEMU 自行退出）。任一断言失败即红。
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: '0 18 * * *'   # 每日 UTC 18:00 全链路巡检
+
+jobs:
+  boot-smoke:
+    name: QEMU 启动冒烟（断言链）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装依赖（交叉工具链 + QEMU + e2fsprogs）
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-system-arm e2fsprogs file
+
+      - name: 构建 busybox 1.36.1（aarch64 交叉编译）
+        run: |
+          ci/build-busybox.sh "$HOME/linux-build"
+          echo "BB=$HOME/linux-build/busybox-1.36.1/_install" >> "$GITHUB_ENV"
+
+      - name: 交叉编译 aether-init / aetherosd（aarch64 静态 ELF）
+        run: |
+          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c
+          aarch64-linux-gnu-gcc -static -O2 -Wall \
+            -DAETHEROS_BUILD='"ci"' -o aetherosd-aarch64-static aetherosd.c
+          ci/check-artifacts.sh aether-init-aarch64 aetherosd-aarch64-static
+
+      - name: 构建 rootfs（make_rootfs.sh 参数化路径）
+        env:
+          ROOT: ${{ runner.temp }}/rootfs
+          IMG: ${{ runner.temp }}/aetheros-rootfs.ext4
+        run: ./make_rootfs.sh
+
+      - name: QEMU 启动冒烟（断言链）
+        run: |
+          mkdir -p "$RUNNER_TEMP/share"
+          python3 ci/boot-smoke.py \
+            --kernel aetheros-kernel-6.6.70-aarch64.Image \
+            --rootfs "$RUNNER_TEMP/aetheros-rootfs.ext4" \
+            --share "$RUNNER_TEMP/share" \
+            --log "$RUNNER_TEMP/boot-smoke.log" \
+            --summary "$RUNNER_TEMP/boot-smoke.summary.txt"
+
+      - name: 上传串口日志与断言汇总（失败也上传，用于定位）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: boot-smoke-evidence
+          path: |
+            ${{ RUNNER_TEMP }}/boot-smoke.log
+            ${{ RUNNER_TEMP }}/boot-smoke.summary.txt

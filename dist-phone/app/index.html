@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#05070d">
+<link rel="manifest" href="manifest.webmanifest">
+<title>AetherOS Phone</title>
+<style>
+  :root{ --bg:#05070d; --term:#0a0e16; --green:#39ff9e; --dim:#5c6b7a; --blue:#4aa8ff; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:#cfe; font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif; overflow:hidden; }
+  body{ display:flex; flex-direction:column; height:100dvh; }
+  header{ flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:10px 14px;
+          background:linear-gradient(180deg,#0d1320,#070b12); border-bottom:1px solid #1b2740; }
+  header .logo{ font-weight:700; letter-spacing:.5px; font-size:15px; color:#eaf6ff; }
+  header .logo b{ color:var(--green); }
+  .pill{ font-size:11px; padding:3px 9px; border-radius:999px; background:#11203a; color:var(--blue); border:1px solid #1d3a63; }
+  .pill.ok{ background:#0e2a1c; color:var(--green); border-color:#1c5b3c; }
+  .pill.busy{ background:#2a2410; color:#ffd166; border-color:#5b4a1c; }
+  .spacer{ flex:1; }
+  header button{ font-size:13px; padding:6px 12px; border-radius:8px; border:1px solid #2a3a55;
+                 background:#13203a; color:#dff; }
+  header button:active{ background:#1d3056; }
+
+  main{ flex:1 1 auto; position:relative; min-height:0; }
+  section{ position:absolute; inset:0; display:flex; flex-direction:column; }
+  section[hidden]{ display:none; }
+
+  /* 终端 */
+  #term{ flex:1; overflow-y:auto; background:var(--term); padding:12px 14px; font-family:"SFMono-Regular",ui-monospace,Menlo,Consolas,monospace;
+         font-size:12.5px; line-height:1.5; color:var(--green); white-space:pre-wrap; word-break:break-all; }
+  #term .sys{ color:#7fb6ff; }
+  #term .err{ color:#ff6b6b; }
+  #term-input{ flex:0 0 auto; display:flex; align-items:center; gap:8px; padding:10px 12px; background:#070b12; border-top:1px solid #16223a; }
+  #term-input .prompt{ color:var(--blue); font-family:ui-monospace,monospace; font-size:12px; white-space:nowrap; }
+  #term-input input{ flex:1; background:#0c1320; border:1px solid #20324f; color:#eafff4; border-radius:8px; padding:9px 10px; font-size:13px; font-family:ui-monospace,monospace; }
+  #term-input button{ background:var(--green); color:#04130b; font-weight:700; border:none; border-radius:8px; padding:9px 14px; font-size:13px; }
+  #term-input button:disabled{ opacity:.5; }
+  #hint{ flex:0 0 auto; font-size:11px; color:var(--dim); padding:6px 14px 10px; background:#070b12; }
+
+  /* 屏幕 */
+  #screen-wrap{ flex:1; position:relative; background:#000; overflow:hidden; display:flex; align-items:center; justify-content:center; }
+  #rfb{ width:100%; height:100%; object-fit:contain; image-rendering:auto; touch-action:none; background:#000; }
+  #screen-msg{ position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); color:#8fa; font-size:14px; text-align:center; padding:0 20px; }
+  .float-btn{ position:absolute; bottom:env(safe-area-inset-bottom,14px); padding:10px 16px; border-radius:10px; border:1px solid #2a3a55;
+              background:rgba(15,25,45,.85); color:#dff; font-size:13px; backdrop-filter:blur(4px); }
+  #btn-back{ left:14px; }
+  #btn-reconnect{ right:14px; }
+</style>
+</head>
+<body>
+  <header>
+    <div class="logo">Aether<b>OS</b> Phone</div>
+    <span id="status" class="pill">连接中…</span>
+    <span class="spacer"></span>
+    <button id="btn-toggle">屏幕</button>
+  </header>
+
+  <main>
+    <section id="view-term">
+      <div id="term"><div id="term-body"></div></div>
+      <div id="term-input">
+        <span class="prompt">aether@phone:~$</span>
+        <input id="cmd" value="aether install" autocomplete="off" spellcheck="false">
+        <button id="run">运行 ▶</button>
+      </div>
+      <div id="hint">点“运行”自动下载并启动系统（首次约需 1–3 分钟，纯软件模拟）。启动就绪后自动切到屏幕。</div>
+    </section>
+
+    <section id="view-screen" hidden>
+      <div id="screen-wrap">
+        <canvas id="rfb" width="720" height="1600"></canvas>
+        <div id="screen-msg">正在连接系统屏幕…</div>
+      </div>
+      <button id="btn-back" class="float-btn">← 终端</button>
+      <button id="btn-reconnect" class="float-btn">重新连接</button>
+    </section>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>

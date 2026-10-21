@@ -1,0 +1,69 @@
+# ============================================================
+# AetherOS-Phone 仓库忽略规则
+# 设计原则：源码 + 文档 + 配置 + 不可重建的大二进制（走 LFS）入库；
+#           GB 级目录、可由源码重建的产物、运行期证据、私钥一律排除。
+# 注意：gitignore 不支持行内注释，注释必须单独成行。
+# ============================================================
+
+# ---- GB 级目录（绝不入库）----
+# android/：4.7G，Android 兼容层调试镜像，与客机系统无关
+android/
+
+# hostshare/：287M，9p 宿主共享目录，运行期生成
+hostshare/
+
+# ---- 可由源码重建的磁盘镜像 ----
+# *.ext4：rootfs（make_rootfs.sh 重建）/ 各槽位盘（ci/make_ab.sh 重建）
+*.ext4
+*.img
+
+# ---- 顶层预编译用户态二进制（交叉编译即可重建，见 AGENTS.md）----
+/aether-init-aarch64
+/aetherosd-aarch64-static
+/aetherosd-x86
+/aether-compositor
+/aether-demo
+/aether-ota-aarch64
+
+# ---- 交叉编译 / 宿主构建产物 ----
+# build/：宿主与客机各类二进制（aether-pkg / sandbox-run / systemui / watchdog 等）
+build/
+
+# ---- 发布打包产物（可由脚本重建）----
+dist-phone/aetheros-phone.tar.gz
+dist-phone/aetheros-phone-app.apk
+dist-phone/aetheros-phone-app.apk.idsig
+dist-phone/aether-phone-app.tar.gz
+dist-phone/share/
+
+# ---- 私钥与密钥（绝不可入库）----
+*.key
+ci/test-signing.key
+
+# ---- 运行期 / CI 证据与日志（可由 CI 复跑重建）----
+*.log
+ci-evidence/
+ci-evidence.log
+boot-smoke-summary.txt
+boot-smoke*.log
+boot-smoke*.summary.txt
+aether-init-boot-evidence.log
+aether-init-flap-evidence.log
+
+# ---- 截图证据（boot-smoke 可重新落盘）----
+/aether-comp-shot.png
+/aether-comp-shot.ppm
+/aether-updater-window.png
+/aether-updater-window-crop.png
+dist-phone/sysui-window-crop.png
+dist-phone/vnc-desktop-preview.png
+
+# ---- Python 缓存 ----
+__pycache__/
+*.pyc
+
+# ---- 杂项 ----
+.DS_Store
+*.tmp
+*.swp
+/share/
