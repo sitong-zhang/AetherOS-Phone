@@ -55,4 +55,4 @@ jobs:
         with:
           name: ipc-smoke-logs
           path: |
-            ${{ RUNNER_TEMP }}/ipc-smoke/daemon.log
+            ${{ runner.temp }}/ipc-smoke/daemon.log
