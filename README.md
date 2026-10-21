@@ -127,7 +127,8 @@ bash bootstrap.sh          # 装交叉工具链 + QEMU + e2fsprogs + Git LFS 并
 
 ```bash
 # 1) 交叉编译静态 ELF（对应 make_rootfs.sh 的 AETHER_* 变量）
-aarch64-linux-gnu-gcc -static -O2 -o aether-init-aarch64 aether-init.c
+# aether-init.c 依赖 aether-log.c / aether-sandbox.c 的函数定义，必须一并编入链接。
+aarch64-linux-gnu-gcc -static -O2 -o aether-init-aarch64 aether-init.c aether-log.c aether-sandbox.c
 aarch64-linux-gnu-gcc -static -O2 -DAETHEROS_BUILD='"local"' -o aetherosd-aarch64-static aetherosd.c
 aarch64-linux-gnu-gcc -static -O2 -I. -o aether-compositor aether-compositor.c aether-drm.c aether-render.c
 # 其余组件（pkg / sandbox-run / systemui / settings / clock / updater / logd / crashd /

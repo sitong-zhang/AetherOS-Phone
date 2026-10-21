@@ -24,7 +24,9 @@ jobs:
 
       - name: 交叉编译 aether-init（aarch64 静态 ELF）
         run: |
-          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c
+          # aether-init.c 通过 aether-log.h / aether-sandbox.h 声明函数，
+          # 但其定义分别位于 aether-log.c / aether-sandbox.c，必须一并编入链接。
+          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c aether-log.c aether-sandbox.c
 
       - name: 交叉编译 aetherosd（aarch64 静态 ELF）
         run: |

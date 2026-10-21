@@ -32,7 +32,8 @@ jobs:
 
       - name: 交叉编译 aether-init / aetherosd（aarch64 静态 ELF）
         run: |
-          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c
+          # aether-init.c 依赖 aether-log.c / aether-sandbox.c 中的函数定义，必须一并编入链接。
+          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c aether-log.c aether-sandbox.c
           aarch64-linux-gnu-gcc -static -O2 -Wall \
             -DAETHEROS_BUILD='"ci"' -o aetherosd-aarch64-static aetherosd.c
           ci/check-artifacts.sh aether-init-aarch64 aetherosd-aarch64-static

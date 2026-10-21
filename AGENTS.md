@@ -47,6 +47,10 @@ aarch64-linux-gnu-gcc -static -O2 -Wall -o <out> <src>.c
 - **`aetherosd`** 需注入构建号：`-DAETHEROS_BUILD='"ci"'` 或 `"local"`。
 - **`aether-compositor`** 是多文件编译：`aether-compositor.c aether-drm.c aether-render.c`，
   且需 `-I.`（用 `aether-drm.h` / `aether-render.h`）；CI 还加了 `-Wextra`。
+- **`aether-init`** 也是多文件编译（不要按下面「单文件」范式）：需一并编入
+  `aether-log.c`（日志发送 `aether_log_init` / `aether_log`）与 `aether-sandbox.c`
+  （服务沙箱 `aether_apply_sandbox`）的函数定义，即
+  `aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c aether-log.c aether-sandbox.c`。
 - **字体头文件**：`aether-font.h`（8×16 ASCII）与 `aether-font-cjk.h`（16×16 CJK）由
   `tools/gen_font.py` / `tools/gen_cjk_font.py` 生成，已提交，通常无需重生成。
 - **包管理签名**：`aether-pkg.c` 内嵌发布公钥 `aether-pkg-pubkey.h`（由 `aether-pkg keygen`
