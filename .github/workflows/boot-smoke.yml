@@ -5,9 +5,12 @@ name: aether-linux boot smoke
 # 优雅停机（QEMU 自行退出）。任一断言失败即红。
 "on":
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
   schedule:
     - cron: '0 18 * * *'   # 每日 UTC 18:00 全链路巡检
+  workflow_dispatch:
 
 jobs:
   boot-smoke:

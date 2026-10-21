@@ -5,7 +5,10 @@ name: aether-linux build
 # AETHEROSD-PROTOCOL.md 逐条相符——CI 红即止，不放宽。
 "on":
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   cross-compile:
