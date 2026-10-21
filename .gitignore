@@ -39,6 +39,10 @@ dist-phone/share/
 # ---- 私钥与密钥（绝不可入库）----
 *.key
 ci/test-signing.key
+# 例外：ci/test-signing.key 是 CI 专用的 .aepkg 测试发布签名私钥（ed25519），
+# 仓库已提交与之匹配的公钥 aether-pkg-pubkey.h。为保证 boot-smoke 开箱即绿、
+# 客机内验签断言（P 段）可复现，此测试 fixture 必须入库。切勿用它签真实发布包。
+!ci/test-signing.key
 
 # ---- 运行期 / CI 证据与日志（可由 CI 复跑重建）----
 *.log

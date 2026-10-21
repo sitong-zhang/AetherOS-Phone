@@ -1,8 +1,11 @@
 name: aether-linux boot smoke
 
-# 真机级冒烟：busybox 交叉编译 -> rootfs 构建 -> QEMU 启动 -> 严格断言链。
+# 真机级冒烟：busybox 交叉编译 -> 全套用户态交叉编译 -> 宿主签名器 ->
+# 测试包生成 -> rootfs 构建 -> QEMU 启动 -> 严格断言链。
 # 断言链覆盖：PID1 身份、服务拓扑、IPC 准入与契约、9p 共享、崩溃自恢复、
-# 优雅停机（QEMU 自行退出）。任一断言失败即红。
+# 优雅停机（QEMU 自行退出）、.aepkg 验签/安装/沙箱运行。任一断言失败即红。
+# 构建序列与 ci/run-ci.sh 的 stage 2 / host-pkg / pkg-test-assets 严格对齐，
+# 保证「本地 run-ci.sh」与「GitHub Actions」行为一致。
 "on":
   push:
     branches: [main]
@@ -18,41 +21,120 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - name: 检出（含 Git LFS 大二进制：内核镜像）
+        uses: actions/checkout@v4
+        with:
+          lfs: true
 
-      - name: 安装依赖（交叉工具链 + QEMU + e2fsprogs）
+      - name: 安装依赖（交叉工具链 + 宿主 gcc + QEMU + e2fsprogs + Git LFS）
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-aarch64-linux-gnu qemu-system-arm e2fsprogs file
+          sudo apt-get install -y gcc-aarch64-linux-gnu gcc qemu-system-arm e2fsprogs file git-lfs
 
       - name: 构建 busybox 1.36.1（aarch64 交叉编译）
         run: |
           ci/build-busybox.sh "$HOME/linux-build"
           echo "BB=$HOME/linux-build/busybox-1.36.1/_install" >> "$GITHUB_ENV"
 
-      - name: 交叉编译 aether-init / aetherosd（aarch64 静态 ELF）
+      - name: 交叉编译全套用户态 + 宿主签名器（对齐 ci/run-ci.sh）
+        env:
+          BUILD: ${{ runner.temp }}/build
+          SHARE: ${{ runner.temp }}/share
+          REPO: ${{ github.workspace }}
+          TN: ${{ github.workspace }}/third_party/tweetnacl
         run: |
-          # aether-init.c 依赖 aether-log.c / aether-sandbox.c 中的函数定义，必须一并编入链接。
-          aarch64-linux-gnu-gcc -static -O2 -Wall -o aether-init-aarch64 aether-init.c aether-log.c aether-sandbox.c
-          aarch64-linux-gnu-gcc -static -O2 -Wall \
-            -DAETHEROS_BUILD='"ci"' -o aetherosd-aarch64-static aetherosd.c
-          ci/check-artifacts.sh aether-init-aarch64 aetherosd-aarch64-static
+          mkdir -p "$BUILD" "$SHARE"
+          CROSS=aarch64-linux-gnu-gcc
+          # P2-13a: init 链接 aether-log.c / aether-sandbox.c
+          "$CROSS" -static -O2 -Wall -I"$REPO" -o "$BUILD/aether-init-aarch64" \
+            "$REPO/aether-init.c" "$REPO/aether-sandbox.c" "$REPO/aether-log.c"
+          "$CROSS" -static -O2 -Wall -DAETHEROS_BUILD='"ci"' -o "$BUILD/aetherosd-aarch64-static" "$REPO/aetherosd.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-compositor" \
+            "$REPO/aether-compositor.c" "$REPO/aether-drm.c" "$REPO/aether-render.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-demo" "$REPO/aether-demo.c"
+          # P1-2c: OTA 槽位管理器
+          "$CROSS" -static -O2 -Wall -o "$BUILD/aether-ota-aarch64" "$REPO/aether-ota.c"
+          # P2-11: 包管理器（客机 aarch64 静态）+ tweetnacl（上游自带 sign-compare，单独 -w）
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -I"$TN" -c "$REPO/aether-pkg.c" -o "$BUILD/aether-pkg-cross.o"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -c "$REPO/aether-sha256.c" -o "$BUILD/aether-sha256-cross.o"
+          "$CROSS" -static -O2 -w -I"$TN" -c "$TN/tweetnacl.c" -o "$BUILD/tweetnacl-cross.o"
+          "$CROSS" -static -o "$BUILD/aether-pkg-aarch64" "$BUILD/aether-pkg-cross.o" "$BUILD/aether-sha256-cross.o" "$BUILD/tweetnacl-cross.o"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-sandbox-run" "$REPO/aether-sandbox-run.c" "$REPO/aether-sandbox.c"
+          "$CROSS" -static -O2 -Wall -Wextra -o "$BUILD/aether-hello" "$REPO/aether-hello.c"
+          # P2-13: 可观测性三件套 + 日志客户端
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-logd" "$REPO/aether-logd.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-logctl" "$REPO/aether-logctl.c" "$REPO/aether-log.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-crashd" "$REPO/aether-crashd.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-watchdog" "$REPO/aether-watchdog.c" "$REPO/aether-log.c"
+          # P3-14: SystemUI（链接渲染层与日志客户端）
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-systemui" \
+            "$REPO/aether-systemui.c" "$REPO/aether-render.c" "$REPO/aether-log.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-sysuictl" "$REPO/aether-sysuictl.c"
+          # P4-1 / P5: 设置 / 时钟 / 系统更新（链接渲染层）
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-settings" "$REPO/aether-settings.c" "$REPO/aether-render.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-clock" "$REPO/aether-clock.c" "$REPO/aether-render.c"
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-updater" "$REPO/aether-updater.c" "$REPO/aether-render.c"
+          # Android 宿主 HAL 后端（客户机侧）
+          "$CROSS" -static -O2 -Wall -Wextra -I"$REPO" -o "$BUILD/aether-hal-android" "$REPO/aether-hal-android.c"
+          # 宿主 aether-pkg：给 rootfs 里的 .aepkg 签名（跑在 CI 机器上）
+          gcc -O2 -Wall -Wextra -I"$REPO" -I"$TN" -c "$REPO/aether-pkg.c" -o "$BUILD/aether-pkg-main.o"
+          gcc -O2 -Wall -Wextra -I"$REPO" -c "$REPO/aether-sha256.c" -o "$BUILD/aether-sha256.o"
+          gcc -O2 -w -I"$TN" -c "$TN/tweetnacl.c" -o "$BUILD/tweetnacl.o"
+          gcc -o "$BUILD/aether-pkg-host" "$BUILD/aether-pkg-main.o" "$BUILD/aether-sha256.o" "$BUILD/tweetnacl.o"
 
-      - name: 构建 rootfs（make_rootfs.sh 参数化路径）
+      - name: 断言关键工件为 ARM64 静态 ELF
+        run: ci/check-artifacts.sh "${{ runner.temp }}/build/aether-init-aarch64" "${{ runner.temp }}/build/aetherosd-aarch64-static"
+
+      - name: 生成运行时测试包（进 9p share，由 boot-smoke P 段真实安装）
+        env:
+          BUILD: ${{ runner.temp }}/build
+          SHARE: ${{ runner.temp }}/share
+          REPO: ${{ github.workspace }}
+        run: |
+          # hello.aepkg：用仓库内发布的测试签名私钥签名（与内嵌公钥匹配）
+          AETHER_PKG_PRIVKEY="$REPO/ci/test-signing.key" "$BUILD/aether-pkg-host" create \
+            "$SHARE/hello.aepkg" aether.hello "AetherOS Hello" 1.0.0 hello "$BUILD/aether-hello=hello"
+          # hello-foreign.aepkg：外国密钥签名，必须被客机拒绝（证明公钥钉死非摆设）
+          "$BUILD/aether-pkg-host" keygen "$BUILD/foreign-priv.hex" "$BUILD/foreign-pub.hex"
+          AETHER_PKG_PRIVKEY="$BUILD/foreign-priv.hex" "$BUILD/aether-pkg-host" create \
+            "$SHARE/hello-foreign.aepkg" evil.hello "Evil Hello" 1.0.0 hello "$BUILD/aether-hello=hello"
+          "$BUILD/aether-pkg-host" verify "$SHARE/hello.aepkg"
+
+      - name: 构建 rootfs（make_rootfs.sh 参数化路径 + 全套 AETHER_* 变量）
         env:
           ROOT: ${{ runner.temp }}/rootfs
           IMG: ${{ runner.temp }}/aetheros-rootfs.ext4
+          AETHER_INIT: ${{ runner.temp }}/build/aether-init-aarch64
+          AETHEROSD: ${{ runner.temp }}/build/aetherosd-aarch64-static
+          AETHER_COMP: ${{ runner.temp }}/build/aether-compositor
+          AETHER_DEMO: ${{ runner.temp }}/build/aether-demo
+          AETHER_OTA: ${{ runner.temp }}/build/aether-ota-aarch64
+          AETHER_PKG_HOST: ${{ runner.temp }}/build/aether-pkg-host
+          AETHER_PKG: ${{ runner.temp }}/build/aether-pkg-aarch64
+          AETHER_SANDBOX_RUN: ${{ runner.temp }}/build/aether-sandbox-run
+          AETHER_LOGD: ${{ runner.temp }}/build/aether-logd
+          AETHER_LOGCTL: ${{ runner.temp }}/build/aether-logctl
+          AETHER_CRASHD: ${{ runner.temp }}/build/aether-crashd
+          AETHER_WATCHDOG: ${{ runner.temp }}/build/aether-watchdog
+          AETHER_SYSUI: ${{ runner.temp }}/build/aether-systemui
+          AETHER_SYSUICTL: ${{ runner.temp }}/build/aether-sysuictl
+          AETHER_HAL_ANDROID: ${{ runner.temp }}/build/aether-hal-android
+          AETHER_SETTINGS: ${{ runner.temp }}/build/aether-settings
+          AETHER_CLOCK: ${{ runner.temp }}/build/aether-clock
+          AETHER_UPDATER: ${{ runner.temp }}/build/aether-updater
+          AETHER_SIGN_KEY: ${{ github.workspace }}/ci/test-signing.key
         run: bash ./make_rootfs.sh
 
       - name: QEMU 启动冒烟（断言链）
+        env:
+          SHARE: ${{ runner.temp }}/share
         run: |
-          mkdir -p "$RUNNER_TEMP/share"
           python3 ci/boot-smoke.py \
             --kernel aetheros-kernel-6.6.70-aarch64.Image \
-            --rootfs "$RUNNER_TEMP/aetheros-rootfs.ext4" \
-            --share "$RUNNER_TEMP/share" \
-            --log "$RUNNER_TEMP/boot-smoke.log" \
-            --summary "$RUNNER_TEMP/boot-smoke.summary.txt"
+            --rootfs "${{ runner.temp }}/aetheros-rootfs.ext4" \
+            --share "$SHARE" \
+            --log "${{ runner.temp }}/boot-smoke.log" \
+            --summary "${{ runner.temp }}/boot-smoke.summary.txt"
 
       - name: 上传串口日志与断言汇总（失败也上传，用于定位）
         if: always()
