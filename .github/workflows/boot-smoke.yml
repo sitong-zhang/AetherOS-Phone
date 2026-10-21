@@ -3,7 +3,7 @@ name: aether-linux boot smoke
 # 真机级冒烟：busybox 交叉编译 -> rootfs 构建 -> QEMU 启动 -> 严格断言链。
 # 断言链覆盖：PID1 身份、服务拓扑、IPC 准入与契约、9p 共享、崩溃自恢复、
 # 优雅停机（QEMU 自行退出）。任一断言失败即红。
-on:
+"on":
   push:
   pull_request:
   schedule:
