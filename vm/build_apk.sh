@@ -62,7 +62,7 @@ cp -r "$GLUE_SRC" "$WORK/glue/org/libsdl/"
 # androidx.appcompat.app.AppCompatActivity，而独立工程不打包 androidx 类，
 # 加载 BootActivity 会 NoClassDefFoundError 直接闪退。它用到的父类方法
 # (onCreate/onResume/onPause/onDestroy/dispatchKeyEvent/onLowMemory/
-#  onWindowFocusChanged) 在 android.app.Activity 里全部存在，改回 Activity 即可。
+#  onWindowFocusChanged) 在 android.app.Activity 里全部存在，改回 Activity 后生效。
 find "$WORK/glue" -name '*.smali' -exec \
   sed -i 's|Landroidx/appcompat/app/AppCompatActivity;|Landroid/app/Activity;|g' {} +
 if grep -rq "androidx/appcompat" "$WORK/glue"; then

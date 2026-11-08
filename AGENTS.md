@@ -2,7 +2,7 @@
 
 ## 0. 一句话定位
 
-AetherOS = ARM64 Linux 6.6.70 内核 + 完全自研用户态。主线交付为**自包含 Android APK 内嵌 QEMU 虚拟机**，点按一次开机进桌面。旧 Termux / WebView / VNC 实现已归档至 `legacy/`，只读、不再维护。
+AetherOS = ARM64 Linux 6.6.70 内核 + 完全自研用户态。主线交付为**自包含 Android APK 内嵌 QEMU 虚拟机**，点按一次开机进桌面。早期 Termux / WebView / VNC 交付方式已停止维护，相关源码与文档已从本仓库移除。
 
 ## 1. 目录
 

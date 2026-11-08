@@ -97,7 +97,7 @@ public final class CrashHandler implements Thread.UncaughtExceptionHandler {
 
     /* ---------------- 启动阶段标记（1.0.5 核心）----------------
      * 覆盖写，只保留「最后走到哪一步」。进程被 SIGSEGV/SIGABRT/LMK 杀死时
-     * 文件已经落盘且不会被清，下次冷启动即可精确判断崩溃阶段。 */
+     * 文件已经落盘且不会被清，下次冷启动可据此判断崩溃阶段。 */
     public static void markStage(Context c, String stage) {
         try { write(stageFile(c), stamp() + "  " + stage + "\n"); }
         catch (Throwable ignored) {}
@@ -140,8 +140,8 @@ public final class CrashHandler implements Thread.UncaughtExceptionHandler {
                             : "无输出 → 引擎未成功启动，崩在 QEMU/SDL native 初始化阶段") + "\n"
                       + "常见原因：native 致命信号(SIGSEGV/SIGABRT)、内存不足被系统回收(LMK)、\n"
                       + "          -display sdl / virtio-gpu 初始化失败、QEMU 参数不被真机接受。\n"
-                      + "★ 本文件为完整报告，已自动保存为 .txt；点「保存文件」即可通过\n"
-                      + "  系统分享把原文件发给开发者，不会因粘贴被截断。\n"
+                      + "★ 本文件为完整报告，已自动保存为 .txt；点击「保存文件」可通过\n"
+                      + "  系统分享导出原文件，内容不经过剪贴板、不做截断。\n"
                       + "  【① 引擎 stdout/stderr ② 内核串口 ③ native 崩溃摘要】置顶，\n"
                       + "  是区分「QEMU 参数/初始化报错 exit」与「native 信号崩溃」的关键。\n";
             } else {
@@ -230,11 +230,11 @@ public final class CrashHandler implements Thread.UncaughtExceptionHandler {
 
         File vm = new File(c.getFilesDir(), "vm");
 
-        // ★ 1.0.7：报告现在整份落盘成 .txt，不再受聊天框粘贴长度限制。
+        // ★ 1.0.7：报告整份落盘为 .txt，不受粘贴长度限制。
         // 三段仍置顶（阅读方便），但下面各段上限全面放宽：文件里是完整原文，
-        // 不截断、不「优先发三段」—— 直接把整个 .txt 文件发给开发者即可。
+        // 不截断、不「优先发三段」—— 导出完整的 .txt 文件。
         b.append("【说明】本文件为完整报告（未做任何粘贴长度裁剪）。\n");
-        b.append("点「保存文件」把本 .txt 通过系统分享发给开发者即可，不会有缺失。\n\n");
+        b.append("点击「保存文件」导出本 .txt 并通过系统分享发送；报告内容完整，不做截断。\n\n");
 
         b.append("========== ★ ① 引擎 stdout/stderr（qemu_stdio.log）==========\n")
          .append(describeTail(new File(vm, "qemu_stdio.log"), 200000)).append("\n");

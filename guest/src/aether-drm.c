@@ -156,7 +156,7 @@ int aether_drm_open(struct aether_drm *d, const char *dev, const char *res)
     }
     d->crtc_id = crtc_id;
 
-    /* 选主平面（PRIMARY），且覆盖我们的 crtc */
+    /* 选主平面（PRIMARY），且覆盖当前 crtc */
     drmModePlaneResPtr pres = drmModeGetPlaneResources(d->fd);
     uint32_t plane_id = 0;
     uint32_t fallback_plane = 0;

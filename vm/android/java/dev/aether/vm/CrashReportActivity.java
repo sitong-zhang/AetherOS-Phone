@@ -49,8 +49,8 @@ public final class CrashReportActivity extends Activity {
 
         TextView hint = new TextView(this);
         hint.setText("下面是应用崩溃时的具体错误，报告已完整生成。\n"
-                + "★ 点「保存文件」把完整报告存成 .txt，并在弹出的发送面板里\n"
-                + "   把该文件发给开发者 —— 不经过剪贴板，不会被粘贴长度截断。\n"
+                + "★ 点击「保存文件」将完整报告存为 .txt，并在系统分享面板中\n"
+                + "   发送该文件 —— 不经过剪贴板，内容不做截断。\n"
                 + "报告同时会自动落到「下载/AetherVM/」目录。文本也支持长按选择。");
         hint.setTextColor(0xFF9FB3C8);
         hint.setTextSize(13);

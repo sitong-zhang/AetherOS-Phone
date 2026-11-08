@@ -83,8 +83,8 @@ public final class LaunchActivity extends Activity {
 
         TextView hint = new TextView(this);
         hint.setText("上次启动未能正常收尾，完整报告已生成（本页不会自动启动引擎）。\n"
-                + "★ 点「保存文件」把完整报告存成 .txt，并在弹出的发送面板里\n"
-                + "   把该文件发给开发者 —— 不再走剪贴板，不会被粘贴长度截断。\n"
+                + "★ 点击「保存文件」将完整报告存为 .txt，并在系统分享面板中\n"
+                + "   发送该文件 —— 不经过剪贴板，内容不做截断。\n"
                 + "报告同时会自动落到「下载/AetherVM/」目录，也可在文件管理器找到。");
         hint.setTextColor(0xFF9FB3C8);
         hint.setTextSize(12);
@@ -141,7 +141,7 @@ public final class LaunchActivity extends Activity {
         CrashHandler.clearLaunchStart(this);
         CrashHandler.markLaunchStart(this);
         CrashHandler.markStage(this, "STAGE_RETRY_BOOT");
-        BootTrace.mark("用户点「重试进入系统」");
+        BootTrace.mark("点击「重试进入系统」");
         startActivity(new Intent(this, BootActivity.class));
         finish();
     }

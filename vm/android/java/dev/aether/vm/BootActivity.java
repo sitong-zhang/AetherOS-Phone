@@ -28,7 +28,7 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * 真正启动、nativeRunMain() 第一次真正进入 QEMU native 代码，真机随即闪退且
  * 零反馈：native 信号崩溃不产生 Java 异常，CrashGuard 不接管 SIGSEGV，启动
  * 标记又在 onCreate 末尾被清掉。本版在每个关键步骤 CrashHandler.markStage()
- * 覆盖写盘 —— 进程被任何信号杀死都来不及清，下次冷启动即可精确知道崩在哪一步。
+ * 覆盖写盘 —— 进程被任何信号杀死都来不及清，下次冷启动可读取到崩溃阶段标记。
  * clearLaunchStart 不再在 onCreate 末尾调用，改由「内核串口有输出＝引擎确实
  * 起来了」时清除（见 DiagnosticsOverlay.refresh）。
  */
@@ -191,7 +191,7 @@ public class BootActivity extends SDLActivity {
         }
 
         // surface 就绪检测 + 兜底。glue 的 SDLSurface 自己已 addCallback(this)，
-        // 我们再挂一个只读 Callback 观察生命周期，不改动它原来的状态机。
+        // 此处另挂一个只读 Callback 观察生命周期，不改动原有状态机。
         surface.getHolder().addCallback(new SurfaceHolder.Callback() {
             @Override public void surfaceCreated(SurfaceHolder h) {
                 BootTrace.mark("SDLSurface.surfaceCreated（ANativeWindow 就绪）");

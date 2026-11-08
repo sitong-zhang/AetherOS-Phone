@@ -201,7 +201,7 @@ public final class DiagnosticsOverlay {
          .append(tail(new File(vmDir, "vm.conf.final"), 16384)).append("\n");
         b.append("---- nativeLibraryDir 库清单 ----\n").append(libList()).append("\n");
         b.append("---- 启动阶段 BootTrace ----\n").append(BootTrace.read()).append("\n");
-        b.append("========== 报告结束：点「保存文件」把本文件发给开发者 ==========\n");
+        b.append("========== 报告结束：点击「保存文件」导出本文件并发送 ==========\n");
         return b.toString();
     }
 
@@ -227,7 +227,7 @@ public final class DiagnosticsOverlay {
                 s.append("[内核串口]\n").append(serial.isEmpty() ? "(暂无)\n" : serial).append("\n");
                 s.append("[启动阶段]\n").append(trace).append("\n");
                 s.append("提示：若长时间无内核串口输出，说明引擎未成功启动，\n")
-                 .append("请点「保存文件」把完整 .txt 报告发给开发者（不会被截断）。\n");
+                 .append("点击「保存文件」导出完整 .txt 报告并发送（内容不做截断）。\n");
                 body.setText(s.toString());
             }
         });

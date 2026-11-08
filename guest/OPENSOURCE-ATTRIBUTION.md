@@ -20,7 +20,7 @@
 | 完整调研范围 | README、`backdrop/build.gradle.kts`、库本体 30 个 Kotlin 文件、catalog 全部示例场景（ControlCenter / LockScreen / ProgressiveBlur / Magnifier / Home / Dialog 等）、`effects/{Blur,Lens,RenderEffect}.kt`、`internal/Shaders.kt` 全部 AGSL、`highlight/Highlight*.kt`、`DrawBackdropModifier.kt` / `BackdropEffectScope.kt` 捕获与效果链、LICENSE |
 | 关键理解（怎么用） | `Modifier.drawBackdrop(backdrop, shape, effects { vibrancy(); blur(); lens(...) }, highlight)`；库**不含**高层组件，需自行组合；效果链顺序 blur→lens；backdrop 由 `LayerBackdrop` 记录图层，`RenderEffect`/`RuntimeShader` 施加 |
 | 许可证 | Apache License 2.0 |
-| **采用理由** | 提供业内公认的液态玻璃**光学数学基准**：圆角矩形 SDF 与梯度、`circleMap` 折射位移、7 段色散权重、法线·光照夹角高光。这些是「玻璃边缘为什么会有拉伸和反光」的权威公式，正是我们 C 软渲染缺失的部分 |
+| **采用理由** | 提供业内公认的液态玻璃**光学数学基准**：圆角矩形 SDF 与梯度、`circleMap` 折射位移、7 段色散权重、法线·光照夹角高光。这些是「玻璃边缘为什么会有拉伸和反光」的权威公式，属于纯 C 软件渲染需要补齐的部分 |
 | 照落到哪里 | `src/aether-glass.c`：`glass_sd_rrect` / `glass_grad_rrect` / `glass_circle_map` / `glass_refraction_d` / `glass_disp_taps` / `glass_highlight`，逐函数标注 `Shaders.kt` 来源 |
 
 ## 方向二 · 液态玻璃组件化实现（Flutter 系，完整组件库）

@@ -24,14 +24,14 @@ import java.util.Locale;
  * 【为什么存在】此前旧版按钮把报告塞进剪贴板，用户粘贴到聊天框时会被
  * 长度限制截断 —— 六版以来开发者反复拿不到 QEMU 报错 / native backtrace。
  * 本类把【完整、不做任何粘贴长度裁剪】的报告直接写成 .txt 文件，并在点击
- * 后自动弹出系统分享面板，用户把原文件发给开发者即可，永远不会被截断。
+ * 后自动弹出系统分享面板，导出原始文件供发送，内容不做截断。
  *
  * 双落点：
  *  A) app 私有 files/reports/ —— 零权限、一定成功；经 ReportProvider 生成
  *     content:// URI 分享，兼容所有 Android 版本（含 minSdk 21）。
  *  B) 公共「下载/AetherVM/」—— API 29+ 走 MediaStore，零权限；用户也能在
  *     文件管理器里直接看到，分享优先用它。
- * 两处都失败才算失败；任一成功即可分享原始文件。
+ * 两处都失败才算失败；任一成功即导出原始文件。
  */
 public final class ReportSaver {
 
@@ -131,7 +131,7 @@ public final class ReportSaver {
         }
         Toast.makeText(c,
                 "完整报告已保存：" + r.bytes + " 字节（未截断）\n" + r.where
-                        + "\n已打开发送面板，把该 .txt 文件发给开发者即可",
+                        + "\n已打开发送面板，可通过系统分享发送该 .txt 文件",
                 Toast.LENGTH_LONG).show();
         if (r.shareUri == null) return;
         try {
