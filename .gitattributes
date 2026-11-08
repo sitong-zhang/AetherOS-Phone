@@ -18,3 +18,9 @@ assets/*.ppm                                    filter=lfs diff=lfs merge=lfs -t
 # 手机端：QEMU 动态库闭包 + 终端 APK（均不可重建）
 dist-phone/terminal-apk/lib/**/*.so             filter=lfs diff=lfs merge=lfs -text
 dist-phone/terminal-apk/*.apk                   filter=lfs diff=lfs merge=lfs -text
+
+# 归档后路径：旧实现整体移入 legacy/，LFS 规则需同步覆盖，
+# 否则 checkout 时这些 LFS 指针不会被拉取。
+legacy/assets/*.ppm                             filter=lfs diff=lfs merge=lfs -text
+legacy/dist-phone/terminal-apk/lib/**/*.so      filter=lfs diff=lfs merge=lfs -text
+legacy/dist-phone/terminal-apk/*.apk            filter=lfs diff=lfs merge=lfs -text
