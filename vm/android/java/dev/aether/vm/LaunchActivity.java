@@ -113,9 +113,11 @@ public final class LaunchActivity extends Activity {
 
         Button save = button("保存文件", 0xFF2D6AE0);
         Button retry = button("重试进入系统", 0xFF2E7D5B);
+        Button update = button("系统更新", 0xFF6A4BC8);
         Button close = button("关闭", 0xFF3A4450);
         row.addView(save, lp);
         row.addView(retry, lp);
+        row.addView(update, lp);
         row.addView(close, lp);
         root.addView(row);
 
@@ -126,6 +128,11 @@ public final class LaunchActivity extends Activity {
         });
         retry.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { retryBoot(); }
+        });
+        update.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                startActivity(new Intent(LaunchActivity.this, UpdateActivity.class));
+            }
         });
         close.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { finish(); }

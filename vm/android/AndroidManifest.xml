@@ -2,13 +2,18 @@
 <!-- Aether VM — 全新独立工程。包名 dev.aether.vm 与任何第三方成品无继承关系。 -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="dev.aether.vm"
-    android:versionCode="14"
-    android:versionName="1.0.15">
+    android:versionCode="15"
+    android:versionName="1.0.16">
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="29" />
     <uses-feature android:glEsVersion="0x00020000" android:required="false" />
 
-    <!-- 内置资产释放到私有目录；不申请任何外部存储/网络权限 -->
+    <!-- 应用内更新：读取公开 Release 信息、下载 APK。公开 API 无需凭证。
+         REQUEST_INSTALL_PACKAGES 用于 Android 8.0 起拉起系统安装器。 -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
+    <!-- 内核与系统盘资产释放到应用私有目录；无外部存储读写权限 -->
     <application
         android:name=".AetherApp"
         android:allowBackup="true"
@@ -56,5 +61,19 @@
             android:authorities="dev.aether.vm.reports"
             android:exported="false"
             android:grantUriPermissions="true" />
+
+        <!-- 更新包分享 Provider：把已校验的 APK 以 content:// 交给系统安装器 -->
+        <provider
+            android:name=".UpdateProvider"
+            android:authorities="dev.aether.vm.update"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+
+        <!-- 系统更新：检查公开 Release、下载、校验、安装 -->
+        <activity
+            android:name=".UpdateActivity"
+            android:label="@string/update_title"
+            android:screenOrientation="portrait"
+            android:exported="false" />
     </application>
 </manifest>

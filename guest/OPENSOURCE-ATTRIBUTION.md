@@ -65,8 +65,11 @@
 | 资产 | 来源 | 许可证 | 用途 |
 |---|---|---|---|
 | 76 枚线性图标 | Lucide `lucide-static@0.468.0` | ISC | 应用/状态栏/控制中心/设置统一描边图标；原始 SVG 存于 `assets/`，`tools/gen_icons.py` 离线光栅化为 `aether-icons-data.h` |
-| CJK 点阵字库 | Noto Sans CJK SC（TTC index 2, 16px） | SIL OFL | `tools/gen_font_cjk.py` 生成 `aether-font-cjk.h`（844 字） |
-| ASCII 点阵 | DejaVu Sans Mono 8x16 | Bitstream Vera / Public Domain | `aether-font.h` |
+| 客机矢量字体 `assets/aether-font.ttf` | Noto Sans CJK SC（TTC index 2）修改版 | SIL OFL 1.1 | 阶段 6 起的主用字体；子集化 + CFF→`glyf` 转换 + 更名 `Aether Sans CJK`，详见下文「阶段 6」 |
+| 矢量栅格化 `src/stb_truetype.h` | `stb_truetype` v1.08（Sean Barrett / RAD Game Tools） | Public Domain | 静态链入合成器，输出灰度抗锯齿字形位图 |
+| 字体生成工具链 | fontTools（`subset` / `Cu2QuPen` / `TTGlyphPen`） | MIT | 仅离线生成字体资产，不进入客机运行时；脚本 `tools/gen_vector_font.py` |
+| CJK 点阵字库 | Noto Sans CJK SC（TTC index 2, 16px） | SIL OFL | `tools/gen_font_cjk.py` 生成 `aether-font-cjk.h`（1001 字）；仅作矢量字体资产缺失时的**点阵回退后端** |
+| ASCII 点阵 | DejaVu Sans Mono 8x16 | Bitstream Vera / Public Domain | `aether-font.h`；同上，回退后端 |
 | 品牌 Logo | 自绘矢量（环形核心 + 数据通道） | 自有 | 总纲 6.5 唯一例外 |
 | 系统图标 | gilbarbara/logos（Tux） | — | 旧版兼容图元 |
 
@@ -110,7 +113,7 @@ GPL-3.0 项目的设计规则与状态机语义仅作参考，不含其代码，
 阶段 5 在既有骨架上做加法，**未引入任何新的第三方代码库或设计资源**：
 
 - **图标**：应用商店（`AE_ICON_DOWNLOAD`）、笔记（`AE_ICON_TYPE`）仍取自既有 Lucide `lucide-static@0.468.0`（ISC）图标集，由 `tools/gen_icons.py` 同一管线光栅化编入 `aether-icons-data.h`，全系统仍一套描边体系（24×24 / stroke 2 / round cap）。
-- **字体**：笔记正文与商店文案沿用 `aether-font-cjk.h`（Noto Sans CJK SC / SIL OFL）。本阶段未改动字体系统，仍 16×16 点阵（见「未做项」）。
+- **字体**：阶段 5 时笔记正文与商店文案沿用 `aether-font-cjk.h`（Noto Sans CJK SC / SIL OFL）、仍为 16×16 点阵；该限制已在阶段 6 由内嵌矢量字体替换解决（见下节）。
 - **应用商店数据**：商店为**本机自策展市场**（`aether-store.c` 内 `struct store_app` 目录），**未接入 F-Droid / Aurora Store / 任何外部仓库**，不联网。诚实边界：应用**评分、下载量、推荐位**为本地策展值；应用**名称、版本号（读 `/etc/aether/version`）、安装体积、权限清单**为真实读取；安装流（下载→校验→安装→完成）按单调时钟真实推进，完成后真写桌面/抽屉空槽并触发首开权限授予弹窗，可真实打开与卸载。
 - **多任务小窗**：悬浮窗为客机 WM 原生能力（同时仅一个，可拖拽移动/缩放，第二请求给 toast 反馈），无第三方依赖。
 - **息屏显示 AOD**：息屏后中心时间/日期/通知数/电量极低亮度暗显，由系统设置总线 `SYS_AOD=20` 控制，关闭后息屏全黑；电源键/点击唤醒。无第三方依赖。
@@ -118,3 +121,35 @@ GPL-3.0 项目的设计规则与状态机语义仅作参考，不含其代码，
 **验证**：host 合成器（headless 720×1280）IPC 驱动导出深浅两套共 56 帧真实 PNG，`aether_desktop_state` JSON 断言：
 安装闭环使 `user_n` 由 0 变 1、`kinds:[15]`（笔记）落位桌面与 Dock；小窗第二请求返回 `float:1` 不变（单浮窗约束）；
 AOD 开启帧非黑率 1.0%（极低亮度暗显）、关闭 `SYS_AOD=20` 后息屏帧 0.0%（全黑）。阶段 6 系统盘 v6 内置 `phonetest-v6.sh` 在客机复跑同口径断言。
+
+---
+
+## 阶段 6 追加说明 · 矢量字体与应用内更新
+
+### 一、矢量字体（替换点阵后端）
+
+总纲 5.20 要求「字体可缩放且布局必须重排，不许裁切重叠」，6.6 要求「字体开源可商用且中文完整覆盖」。原 8×16 / 16×16 点阵只收录源码中静态出现的 1001 个非 ASCII 字符，运行时动态文本会缺字形，且最近邻缩放产生锯齿，无法满足上述条款。按「开源优先、有成熟实现直接照搬」，直接采用成熟字库与成熟栅格化库，不自行设计字形轮廓或光栅化算法。
+
+| 项 | 内容 |
+|---|---|
+| 字库来源 | Noto Sans CJK SC（`NotoSansCJK-Regular.ttc` index 2），SIL Open Font License 1.1 |
+| 修改内容 | 子集化（GB2312 全量汉字 6763 + 常用符号 + 源码字符，共 7720 码点）；CFF/PostScript 三次曲线转换为 TrueType `glyf` 二次曲线；按 OFL 第 3 条改用独立字体名 `Aether Sans CJK` |
+| 生成工具 | fontTools（`fontTools.subset`、`Cu2QuPen`、`TTGlyphPen`），MIT。脚本 `guest/tools/gen_vector_font.py`，产物 `guest/assets/aether-font.ttf`（2,080,884 B） |
+| 栅格化 | `stb_truetype.h` v1.08（Sean Barrett / RAD Game Tools，public domain），静态链入客机合成器；`stbtt_ScaleForPixelHeight` / `GetCodepointBitmapBox` / `MakeCodepointBitmap` 输出灰度抗锯齿位图 |
+| 完整许可证 | `guest/assets/OFL.txt`：含原版权声明、修改说明、生成工具与栅格化工具归属 |
+| **采用理由** | 中文完整覆盖、许可可商用、轮廓与栅格化均为业界成熟实现；`stb_truetype` 为单头文件 public domain 实现，适合纯 C 静态链接的客机用户态，不引入 FreeType 等重型依赖 |
+| 边界 | 字体以 `objcopy -I binary` 转为目标文件**静态链入** `/sbin/aether-compositor`，不作为系统盘内独立文件，避免 ext4 注入大文件引发的 journal / 位图不一致。布局度量保持 ASCII 8px / CJK 16px 格不变，既有 UI 布局零改动；未找到字体资产时回退原点阵后端 |
+
+**裁切根因与修复**：旧点阵把参数 `y` 当作字形第一行、直接硬画 16 行；矢量字形的位图框相对基线为负偏移（如 `y0=-10`），沿用旧逻辑会让字形整体下移并裁掉底部。现按 `py = y + asc_px + y0` 换算基线，使字形完整落入行盒。验证：host 定量断言「行盒内有墨点、行盒下方零墨点、灰度级数 > 200（证明抗锯齿生效）」全部通过；ARM64 full compositor 构建、注入 v6 盘、QEMU TCG 真机闭环（`run_v6.sh` 退出码 0、阶段 5 断言全 OK、无崩溃与 ext4 错误）通过；从真机桌面帧目视确认中文清晰完整、无底部裁切、无缺字形方框。
+
+### 二、应用内更新器
+
+| 项 | 内容 |
+|---|---|
+| 分发通道 | GitHub Releases（公开仓库 `sitong-zhang/AetherOS-Phone` 的 latest Release，固定资产名 `AetherVM.apk`），仅使用公开 REST API 与公开下载直链 |
+| **采用理由** | 版本更新直接复用 GitHub 既有的 Release 能力，不再手工分发安装包。`/releases/latest` 已提供 `tag_name`、资产 `size` 与 `sha256:` digest，可直接用于版本比较与完整性校验，无需自建更新服务，也无需重复造签名与分发轮子 |
+| 实现 | `vm/android/java/dev/aether/vm/` 下 `UpdateManager`（网络、版本比较、digest 校验）、`UpdateProvider`（自研 `ContentProvider`，以 `content://` 暴露私有目录中的 APK）、`UpdateActivity`（纯 Java 界面，无 androidx 依赖）；入口挂在系统诊断浮层与崩溃报告页 |
+| 权限边界 | 新增 `INTERNET` 与 `REQUEST_INSTALL_PACKAGES`；Android 8+ 经 `ACTION_MANAGE_UNKNOWN_APP_SOURCES` 申请安装未知应用授权；**不内置任何访问凭证**（公开读取不需要认证），不申请外部存储读写权限，更新包落在应用私有目录 |
+| 合规 | 未引入第三方更新 SDK（无 androidx / 无 Firebase / 无第三方自升级框架），全部为 Android 平台原生 API |
+
+**验证边界**：Java 源码编译与 dex 打包校验通过；更新包下载、`sha256:` 校验与 `content://` 安装为 Android 系统能力，需在真机安装后触发验证，本仓库的 QEMU 客机闭环不覆盖宿主侧安装流程。

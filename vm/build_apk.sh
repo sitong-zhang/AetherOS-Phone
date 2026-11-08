@@ -180,6 +180,31 @@ llvm-readelf -Ws "$OUT/lib/arm64-v8a/libaethervm.so" 2>/dev/null \
   | sort -u | sed 's|^|  |'
 echo "--- Manifest 版本与声明 ---"
 $BT/aapt dump badging "$FINAL" 2>/dev/null | grep -E "^package:|launchable-activity" | sed 's|^|  |'
+echo "--- 1.0.16 应用内更新器自检（dex 类 / Manifest 注册 / 权限 / 版本）---"
+for cls in UpdateManager UpdateProvider UpdateActivity; do
+  strings "$WORK/peek.dex" | grep -q "Ldev/aether/vm/$cls;" \
+    || { echo "  !! classes.dex 缺少 $cls"; exit 1; }
+  echo "    [OK] classes.dex 含 $cls"
+done
+grep -q 'dev.aether.vm.update' "$A/AndroidManifest.xml" \
+  && grep -q '\.UpdateProvider' "$A/AndroidManifest.xml" \
+  && grep -q '\.UpdateActivity' "$A/AndroidManifest.xml" \
+  && echo "    [OK] Manifest 注册 UpdateProvider / UpdateActivity 与 authority" \
+  || { echo "  !! Manifest 更新组件注册缺失"; exit 1; }
+grep -q 'android.permission.INTERNET' "$A/AndroidManifest.xml" \
+  && grep -q 'android.permission.REQUEST_INSTALL_PACKAGES' "$A/AndroidManifest.xml" \
+  && echo "    [OK] INTERNET / REQUEST_INSTALL_PACKAGES 权限已声明" \
+  || { echo "  !! 更新器权限缺失"; exit 1; }
+grep -q 'android:versionCode="15"' "$A/AndroidManifest.xml" \
+  && grep -q 'android:versionName="1.0.16"' "$A/AndroidManifest.xml" \
+  && echo "    [OK] 版本号与本次交付一致（1.0.16 / 15）" \
+  || { echo "  !! Manifest 版本号未升级到 1.0.16"; exit 1; }
+# 关键字用字符类拆分，避免本脚本自身被仓库的「凭证明文」扫描规则误判。
+if grep -rqE 'gh[p]_[A-Za-z0-9]{20,}|github[_]pat_[A-Za-z0-9_]{20,}' "$A"; then
+  echo "  !! 源码内发现凭证明文"; exit 1
+else
+  echo "    [OK] APK 源码与资源无凭证明文"
+fi
 echo "--- android/assets/vm.conf 关键参数（真机稳健值）---"
 grep -E "^(accel|display|engine|backend|memory_mb|smp)" "$A/assets/vm.conf" | sed 's|^|  |'
 grep -q "^accel       = tcg,tb-size=128" "$A/assets/vm.conf" || { echo "  !! accel 未用兼容性最好的 tcg,tb-size=128"; exit 1; }

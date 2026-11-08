@@ -5,4 +5,5 @@
     <string name="boot_hint">正在启动虚拟机…</string>
     <string name="boot_ready">点击任意处进入系统</string>
     <string name="crash_title">Aether VM 崩溃报告</string>
+    <string name="update_title">系统更新</string>
 </resources>

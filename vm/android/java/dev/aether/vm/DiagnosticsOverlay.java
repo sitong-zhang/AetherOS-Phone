@@ -36,7 +36,8 @@ import java.util.Locale;
  * 发给开发者，不再经过剪贴板（粘贴会被长度截断）。
  * 「隐藏」折叠成右上角小按钮，确认系统画面正常后可全屏查看。
  */
-public final class DiagnosticsOverlay {
+public final class DiagnosticsOverlay
+        implements UpdateManager.Callback, UpdateManager.UiBridge {
 
     private final Activity act;
     private final File vmDir;
@@ -49,6 +50,8 @@ public final class DiagnosticsOverlay {
     private TextView body;
     private volatile boolean expanded = true;
     private volatile String engineState = "引擎：等待 SDL 线程启动 …";
+    private volatile String updateHint = "";
+    private volatile boolean updateChecked = false;
 
     public DiagnosticsOverlay(Activity a, File vmDir) {
         this.act = a;
@@ -106,8 +109,10 @@ public final class DiagnosticsOverlay {
         Button save = button("保存文件", 0xFF2456C8);
         Button hide = button("隐藏", 0xFF33404E);
         Button refreshBtn = button("刷新", 0xFF2E6B52);
+        Button updateBtn = button("系统更新", 0xFF6A4BC8);
         row.addView(save, lp);
         row.addView(refreshBtn, lp);
+        row.addView(updateBtn, lp);
         row.addView(hide, lp);
         panel.addView(row, new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -119,6 +124,11 @@ public final class DiagnosticsOverlay {
         });
         refreshBtn.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { refresh(); }
+        });
+        updateBtn.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
+                act.startActivity(new android.content.Intent(act, UpdateActivity.class));
+            }
         });
         hide.setOnClickListener(new View.OnClickListener() {
             @Override public void onClick(View v) { setExpanded(false); }
@@ -145,6 +155,30 @@ public final class DiagnosticsOverlay {
         // 立刻先画一帧，之后每 2s 刷新；即使引擎把 SDLThread 占满，UI 线程照常工作
         refresh();
         ui.post(refreshTask);
+
+        // 冷启动静默检查一次公开 Release，不阻塞启动、不弹窗，只在状态行给出提示
+        if (!updateChecked) {
+            updateChecked = true;
+            UpdateManager.check(act, this, this);
+        }
+    }
+
+    /* ---- UpdateManager.UiBridge / Callback：状态行只显示一行客观提示 ---- */
+    @Override public void post(Runnable r) { ui.post(r); }
+    @Override public boolean isAlive() { return !act.isFinishing(); }
+
+    @Override public void onCheckStart() { updateHint = ""; }
+    @Override public void onProgress(int percent, long done, long total) {}
+    @Override public void onDownloadDone(File apk, String error) {}
+
+    @Override public void onCheckDone(UpdateManager.Info in, String error) {
+        if (in == null || error != null) {
+            updateHint = "";
+            return;
+        }
+        updateHint = in.newer
+                ? "\n[更新] 发现新版本 " + in.tag + "，点「系统更新」下载安装"
+                : "\n[更新] 当前已是最新版本 " + in.tag;
     }
 
     private final Runnable refreshTask = new Runnable() {
@@ -219,9 +253,10 @@ public final class DiagnosticsOverlay {
             CrashHandler.clearStage(act);
             CrashHandler.clearLaunchStart(act);
         }
+        final String hint = updateHint;
         ui.post(new Runnable() {
             @Override public void run() {
-                status.setText(state);
+                status.setText(state + hint);
                 StringBuilder s = new StringBuilder();
                 s.append("[引擎输出]\n").append(shortLog.isEmpty() ? "(暂无)\n" : shortLog).append("\n");
                 s.append("[内核串口]\n").append(serial.isEmpty() ? "(暂无)\n" : serial).append("\n");

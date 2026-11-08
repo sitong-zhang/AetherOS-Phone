@@ -22,11 +22,14 @@ AetherOS 是一个从零构建的 ARM64 Linux 手机操作系统：**Linux 6.6.7
 
 ## 当前状态（如实标注）
 
-- 版本 `1.0.15` / `versionCode 14`，包名 `dev.aether.vm`。
-- 主线已按《Aether OS 总规划书》推进至**阶段 5**：应用商店与安装/卸载闭环、笔记应用、多任务与最近任务、小窗、息屏显示（AOD）。
-- 阶段 5 已通过全系统 QEMU TCG 真机级闭环验证：41 帧取证、`SELFTEST_STAGE5_DONE=1`、compositor 全程在线、无崩溃与文件系统错误。验证入口 `vm/host/run_v6.sh`。
+- 版本 `1.0.16` / `versionCode 15`，包名 `dev.aether.vm`。
+- 主线已按《Aether OS 总规划书》推进至**阶段 5**：应用商店与安装/卸载闭环、笔记应用、多任务与最近任务、小窗、息屏显示（AOD）。阶段 6 完成全量复跑取证、系统盘注入与 APK 重打包。
+- 阶段 5 断言链已在 v6 系统盘上通过全系统 QEMU TCG 真机级闭环复跑：逐帧取证、`SELFTEST_STAGE5_DONE=1`、compositor 全程在线（fbdev 720×1280）、无崩溃与文件系统错误。验证入口 `vm/host/run_v6.sh`。
+- **矢量字体**：客机文字已从 16×16 点阵升级为内嵌 TrueType 矢量字体（`guest/assets/aether-font.ttf`，Noto Sans CJK SC 的 OFL 修改版子集，7720 码点），由 `stb_truetype` 做抗锯齿灰度栅格化。保持 8/16px 布局格不变，按基线换算修复了文字底部裁切；字体以 `objcopy` 静态链入合成器，不作为系统盘内的独立文件。许可证与采用理由见 [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md)。
+- **应用内更新**：APK 内置「系统更新」界面，读取公开 GitHub Releases latest 接口获取版本与资产摘要，下载后按 `sha256:` digest 校验，再经自研 `ContentProvider` 以 `content://` 交给系统安装器。入口位于系统诊断浮层与崩溃报告页。该模块只访问公开接口，不内置任何访问凭证。
 - **构建边界**：APK 打包依赖本机预置的外部资产（内核 Image、系统盘、SDL2/QEMU 动态库闭包、Android SDK/NDK），这些大二进制不纳入本仓库；仓库内暂未提供一键可复现的完整构建。后续工作项之一是把资产生成脚本化并接入 CI。
-- 尚未完成：矢量字体系统（当前为 16×16 点阵 CJK）、总纲后续章节、真机下载安装验证。
+- **交付阶段**：当前为内部调试阶段，系统尚未对外发布。版本通过 GitHub Release 分发，供应用内更新器读取；本仓库不提供面向公众的宣传页面。
+- 尚未完成：总纲后续章节、真机下载安装与升级链路验证。
 
 ## 开源归属
 

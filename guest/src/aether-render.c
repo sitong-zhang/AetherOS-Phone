@@ -1,8 +1,12 @@
 /*
- * aether-render.c - AetherOS PC 渲染层实现
+ * aether-render.c - AetherOS 渲染层实现
  *
- * 逐像素软件光栅化；ASCII 使用 DejaVu Sans Mono 8x16 点阵，
- * CJK 使用 Noto Sans CJK SC 渲染生成的 16x16 点阵（aether-font-cjk.h）。
+ * 逐像素软件光栅化。文字有两种后端（构建期由 AETHER_VECTOR_FONT 选择）：
+ *   1. 矢量（默认）：Noto Sans CJK SC 的 TrueType 子集 + stb_truetype 抗锯齿
+ *      栅格化，字形按【基线】定位进 16px 行盒，覆盖全 CJK 且任意尺寸平滑；
+ *   2. 点阵（回退）：DejaVu Sans Mono 8x16 / CJK 16x16 点阵，仅 1001 字。
+ * 两种后端共用同一套字符步进（ASCII 8px / 非 ASCII 16px）与 text_width，
+ * 因此切换后端不改变任何既有界面布局。
  */
 #include "aether-render.h"
 
@@ -12,8 +16,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifdef AETHER_VECTOR_FONT
+/* 矢量后端：布局度量仍沿用 8x16 / 16x16 的格子，保证界面零改动 */
+#include "aether-vfont.h"
+#define AETHER_FONT_W 8u
+#define AETHER_FONT_H 16u
+#define AETHER_CJK_W 16u
+#define AETHER_CJK_H 16u
+#else
+/* 点阵回退后端 */
 #include "aether-font.h"
 #include "aether-font-cjk.h"
+#endif
 #include "aether-logo.h"
 #include "aether-glass.h"
 
@@ -200,6 +214,14 @@ static int utf8_next(const char **p, unsigned *cp)
     *cp = '?'; *p += 1; return 1;
 }
 
+/* ---- 文本度量 ----
+ * 字符步进固定为 ASCII 8px / 非 ASCII 16px，与旧点阵后端一致。界面里所有
+ * 居中、换行、文本容器计算都依赖这两个值，因此切换字体后端不改变布局。 */
+static int text_cell_w(unsigned cp)
+{
+    return cp >= 0x80 ? (int)AETHER_CJK_W : (int)AETHER_FONT_W;
+}
+
 int aether_text_width(const char *s) { return (int)strlen(s) * (int)AETHER_FONT_W; }
 
 int aether_text_width_utf8(const char *s)
@@ -207,14 +229,77 @@ int aether_text_width_utf8(const char *s)
     int w = 0;
     unsigned cp;
     const char *p = s;
-    while (utf8_next(&p, &cp)) {
-        if (cp >= 0x80 && aether_cjk_find(cp) >= 0)
-            w += AETHER_CJK_W;
-        else
-            w += AETHER_FONT_W;
-    }
+    while (utf8_next(&p, &cp))
+        w += text_cell_w(cp);
     return w;
 }
+
+#ifdef AETHER_VECTOR_FONT
+
+/* 把矢量字形按【基线】放进 line_h 高的行盒，并水平居中于 cell_w 内。
+ *
+ * 这是「文字底部裁切」的根因修复：旧点阵把参数 y 当作字形第一行、直接硬画
+ * 16 行，一旦文本容器按 ascent 计算高度，字形下缘/descender 就会被裁。
+ * 矢量后端用 stbtt 的 y0 与 asc_px 换算基线（ScaleForPixelHeight 保证
+ * ascent+descent 恰等于行盒高），字形完整落在 [y, y+line_h) 内。
+ * 抗锯齿灰度通过 aether_blend_pixel 混合，自动遵守裁剪与全局淡入 alpha。 */
+static void vfont_cell(int x, int y, unsigned cp, int cell_w, int line_h, unsigned rgb)
+{
+    const struct aether_glyph *g = aether_vfont_get(cp, line_h);
+    if (!g) g = aether_vfont_get('?', line_h);       /* 缺字兜底 */
+    if (!g || g->w <= 0 || g->h <= 0) return;         /* 空格等无轮廓 */
+    int px = x + (cell_w - g->w) / 2;                 /* 格子内水平居中 */
+    int py = y + g->asc_px + g->y0;                   /* 基线换算，不裁切 */
+    for (int row = 0; row < g->h; row++) {
+        for (int col = 0; col < g->w; col++) {
+            unsigned char a = g->alpha[(size_t)row * g->w + col];
+            if (a) aether_blend_pixel(px + col, py + row, rgb, a);
+        }
+    }
+}
+
+void aether_draw_text(int x, int y, const char *s, unsigned rgb)
+{
+    int cx = x;
+    for (int k = 0; s[k]; k++) {
+        unsigned char c = (unsigned char)s[k];
+        if (c < 0x20 || c > 0x7E) c = 0x20;
+        vfont_cell(cx, y, c, (int)AETHER_FONT_W, (int)AETHER_FONT_H, rgb);
+        cx += (int)AETHER_FONT_W;
+    }
+}
+
+void aether_draw_text_utf8(int x, int y, const char *s, unsigned rgb)
+{
+    int cx = x;
+    unsigned cp;
+    const char *p = s;
+    while (utf8_next(&p, &cp)) {
+        int cw = text_cell_w(cp);
+        vfont_cell(cx, y, cp, cw, (int)AETHER_FONT_H, rgb);
+        cx += cw;
+    }
+}
+
+/* 按目标像素高缩放：字符步进沿用 8*ceil(h/16)、行盒 16*ceil(h/16)，
+ * 布局与旧实现完全一致；字形改为矢量抗锯齿渲染，不再最近邻放大。 */
+void aether_draw_text_scale(const char *s, int x, int y, int h, unsigned rgb)
+{
+    if (h <= 0) return;
+    int scale = (h + (int)AETHER_FONT_H - 1) / (int)AETHER_FONT_H;
+    if (scale < 1) scale = 1;
+    int sw = (int)AETHER_FONT_W * scale;
+    int line_h = (int)AETHER_FONT_H * scale;
+    int cx = x;
+    for (int k = 0; s[k]; k++) {
+        unsigned char c = (unsigned char)s[k];
+        if (c < 0x20 || c > 0x7E) c = 0x20;
+        vfont_cell(cx, y, c, sw, line_h, rgb);
+        cx += sw;
+    }
+}
+
+#else /* ---- 点阵回退后端：无矢量字体资产时仍可构建（仅收录 1001 字）---- */
 
 static void draw_ascii(int x, int y, unsigned char c, unsigned rgb)
 {
@@ -251,17 +336,16 @@ void aether_draw_text_utf8(int x, int y, const char *s, unsigned rgb)
     unsigned cp;
     const char *p = s;
     while (utf8_next(&p, &cp)) {
-        if (cp >= 0x80 && aether_cjk_find(cp) >= 0) {
+        int cw = text_cell_w(cp);
+        if (cp >= 0x80) {
             draw_cjk(cx, y, cp, rgb);
-            cx += AETHER_CJK_W;
         } else {
-            draw_ascii(cx, y, (unsigned char)(cp < 0x80 ? cp : '?'), rgb);
-            cx += AETHER_FONT_W;
+            draw_ascii(cx, y, (unsigned char)cp, rgb);
         }
+        cx += cw;
     }
 }
 
-/* ASCII 文字按目标像素高 h 做最近邻缩放（用于锁屏大时钟等） */
 void aether_draw_text_scale(const char *s, int x, int y, int h, unsigned rgb)
 {
     if (h <= 0) return;
@@ -283,6 +367,8 @@ void aether_draw_text_scale(const char *s, int x, int y, int h, unsigned rgb)
         cx += sw;
     }
 }
+
+#endif /* AETHER_VECTOR_FONT */
 
 /* ---- 系统图标（Tux，内嵌位图，来源 gilbarbara/logos） ---- */
 void aether_draw_logo(int cx, int cy, int size)
