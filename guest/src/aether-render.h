@@ -1,0 +1,89 @@
+/*
+ * aether-render.h - AetherOS PC 软件合成渲染层
+ *
+ * CPU 逐像素绘制到 DRM/fbdev 双缓冲（XRGB8888），不依赖任何图形库。
+ * 提供：基础图元、ASCII 8x16 与 CJK 16x16 混合排版、控件图元、
+ *       系统图标（Tux，取自 gilbarbara/logos）、光标。
+ */
+#ifndef AETHER_RENDER_H
+#define AETHER_RENDER_H
+
+#include <stddef.h>
+
+struct render_fb {
+    unsigned char *bits;
+    int w, h;
+    int pitch;
+    int cursor_x, cursor_y;
+};
+
+void aether_render_init(unsigned char *bits, int w, int h, int pitch);
+void aether_render_set_target(unsigned char *bits);
+void aether_render_set_cursor(int x, int y);
+
+/* 只读查询当前画布（供液态玻璃等需要逐像素采样下层的材质模块使用） */
+void aether_render_framebuffer(unsigned char **bits, int *w, int *h, int *pitch);
+
+/* 全局绘制 alpha（255=不透明）：让整组图元做淡入淡出 / 依次入场，
+ * 无需为每个控件单独传 alpha。绘制完务必复位 255。 */
+void aether_render_set_alpha(unsigned char a);
+unsigned char aether_render_alpha(void);
+int  aether_render_cursor_x(void);
+int  aether_render_cursor_y(void);
+
+/* px = 0xFFRRGGBB；小端写入内存序 [B,G,R,0xFF]，与 DRM/fbdev 一致 */
+static inline unsigned pack_rgb(unsigned char r, unsigned char g, unsigned char b)
+{
+    return (0xFFu << 24) | ((unsigned)r << 16) | ((unsigned)g << 8) | b;
+}
+
+/* ---- 基础图元 ---- */
+/* 裁剪矩形：窗口内容渲染前设置，防止文字/控件溢出污染其他窗口 */
+void aether_render_set_clip(int x, int y, int w, int h);
+void aether_render_clear_clip(void);
+
+void aether_clear(unsigned rgb);
+void aether_fill_rect(int x, int y, int w, int h, unsigned rgb);
+void aether_fill_rect_alpha(int x, int y, int w, int h, unsigned rgb, unsigned char a);
+/* 按 alpha 把 rgb 混合到单个像素（供图标/玻璃材质逐像素合成，遵守裁剪与边界） */
+void aether_blend_pixel(int x, int y, unsigned rgb, unsigned char a);
+
+/* ---- 全局位移（统一转场 / 跟手动效） ----
+ * 设置后所有图元坐标叠加 (dx,dy)，做「整层滑入 / 视差」无需改每处绘制；
+ * 层内绘制完调用 aether_render_translate(0,0) 复位。 */
+void aether_render_translate(int dx, int dy);
+
+/* ---- 真算实时模糊（毛玻璃底层） ----
+ * 对【当前画布已绘制内容】的矩形区域做可分离 box blur（降采样 + 多次迭代
+ * 逼近高斯），结果写回画布。非静态贴图、非预烘焙，每帧按当下像素实时运算。
+ * radius 为目标模糊半径（像素）；passes 通过材质档位自动控制。 */
+void aether_blur_rect(int x, int y, int w, int h, int radius);
+/* 模糊并叠加一层色调/暗罩，得到「背景→浮层」的层级分离 */
+void aether_blur_tint(int x, int y, int w, int h, int radius, unsigned tint, unsigned char a);
+
+/* 把画布当前区域快照到独立缓冲 / 从缓冲按 alpha 混合回画布（转场视差用） */
+unsigned *aether_capture_rect(int x, int y, int w, int h);
+void aether_blit_rect(unsigned *buf, int x, int y, int w, int h, unsigned char a);
+void aether_free_capture(unsigned *buf);
+
+/* ---- 文字 ---- */
+void aether_draw_text(int x, int y, const char *s, unsigned rgb);          /* 纯 ASCII */
+void aether_draw_text_utf8(int x, int y, const char *s, unsigned rgb);     /* UTF-8 混合 */
+void aether_draw_text_scale(const char *s, int x, int y, int h, unsigned rgb); /* ASCII 按像素高 h 缩放 */
+int  aether_text_width(const char *s);                                     /* ASCII */
+int  aether_text_width_utf8(const char *s);                                /* UTF-8 混合 */
+
+/* ---- 控件图元 ---- */
+void aether_draw_border(int x, int y, int w, int h, unsigned rgb, int t);
+void aether_draw_round_rect(int x, int y, int w, int h, int r,
+                            unsigned rgb, unsigned char alpha);
+void aether_draw_vgradient(int x, int y, int w, int h, unsigned top, unsigned bot);
+
+/* ---- 图标/光标 ---- */
+void aether_draw_logo(int cx, int cy, int size);
+void aether_draw_cursor(int x, int y);
+
+/* 旧版静态欢迎页，保留兼容（新版桌面不再调用） */
+void aether_render_desktop(const char *clock, double cpu, double mem, int win);
+
+#endif /* AETHER_RENDER_H */

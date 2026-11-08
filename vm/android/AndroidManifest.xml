@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Aether VM — 全新独立工程。包名 dev.aether.vm 与任何第三方成品无继承关系。 -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="dev.aether.vm"
+    android:versionCode="14"
+    android:versionName="1.0.15">
+
+    <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="29" />
+    <uses-feature android:glEsVersion="0x00020000" android:required="false" />
+
+    <!-- 内置资产释放到私有目录；不申请任何外部存储/网络权限 -->
+    <application
+        android:name=".AetherApp"
+        android:allowBackup="true"
+        android:label="@string/app_name"
+        android:icon="@mipmap/ic_launcher"
+        android:theme="@style/AetherTheme"
+        android:hardwareAccelerated="true"
+        android:extractNativeLibs="true">
+
+        <!-- 纯 Java 启动入口：不加载任何 native 库，保证点开一定能看到界面；
+             有未读崩溃报告时先弹报告，否则分发到虚拟机开机界面 -->
+        <activity
+            android:name=".LaunchActivity"
+            android:label="@string/app_name"
+            android:screenOrientation="portrait"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <activity
+            android:name=".BootActivity"
+            android:label="@string/app_name"
+            android:screenOrientation="portrait"
+            android:configChanges="orientation|screenSize|screenLayout|keyboardHidden|uiMode"
+            android:launchMode="singleTask"
+            android:exported="false" />
+
+        <!-- 崩溃报告弹窗：独立进程，主进程崩掉后仍能弹出来；提供保存文件按钮 -->
+        <activity
+            android:name=".CrashReportActivity"
+            android:label="@string/crash_title"
+            android:process=":crash"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:theme="@style/AetherTheme" />
+
+        <!-- 报告文件分享 Provider（自研，不依赖 androidx）。exported=false +
+             grantUriPermissions=true：仅 ACTION_SEND 临时授权目标 App 读 .txt -->
+        <provider
+            android:name=".ReportProvider"
+            android:authorities="dev.aether.vm.reports"
+            android:exported="false"
+            android:grantUriPermissions="true" />
+    </application>
+</manifest>

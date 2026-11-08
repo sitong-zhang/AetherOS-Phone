@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Aether VM</string>
+    <string name="boot_title">Aether OS</string>
+    <string name="boot_hint">正在启动虚拟机…</string>
+    <string name="boot_ready">点击任意处进入系统</string>
+    <string name="crash_title">Aether VM 崩溃报告</string>
+</resources>

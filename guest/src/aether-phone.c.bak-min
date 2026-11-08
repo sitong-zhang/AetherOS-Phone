@@ -1,0 +1,613 @@
+/*
+ * aether-phone.c - AetherOS 手机版外壳（竖屏手机操作系统）
+ *
+ * 状态机：锁屏 -> 主屏 -> 应用(全屏) -> 多任务，下拉通知栏。
+ * 复用 aether_desktop.h 同一套 API，因此合成器主循环、渲染原语、
+ * 真实输入(EV_KEY/EV_ABS/BTN_TOUCH)与 IPC 自动化注入路径完全不变。
+ *
+ * 布局按分辨率自适应：h>w 视为竖屏手机；w>h 视为横屏手机，均按手机形态绘制。
+ * 所有交互为「点击」语义（与真机触摸一致），解锁/通知用点击触发。
+ */
+#include "aether-desktop.h"
+#include "aether-apps.h"
+#include "aether-render.h"
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/* ---- 几何（按短边比例自适应，避免不同分辨率错位） ---- */
+static int g_w, g_h;
+static int g_portrait;          /* 1 = 竖屏 */
+static int STATUS_H, NAV_H, DOCK_H;
+
+enum ph_state { PH_LOCKED = 0, PH_HOME, PH_APP, PH_RECENTS };
+static int g_state = PH_LOCKED;
+static int g_notif = 0;         /* 通知栏是否展开 */
+static int g_theme = 0;         /* 0 深色 1 浅色 */
+static int g_boot_t0;
+static int g_mx = 0, g_my = 0;
+
+/* ---- 窗口/应用管理（复用 aether_win 机制，使每个 app 保有自身状态） ---- */
+static struct aether_win g_wins[MAX_WINDOWS];
+static int g_focus = 0;
+static int g_next_id = 1;
+static int g_app_order[MAX_WINDOWS];   /* 已打开应用 kind 顺序（多任务/恢复用） */
+static int g_app_n = 0;
+
+#define TOPBAR   32   /* 桌面顶栏高度，保留兼容 aether_app 内部状态栏定位 */
+#define TITLEBAR 30
+
+/* ---- 键位映射（Linux KEY_* -> ASCII），与桌面版一致 ---- */
+static char km[128][2];
+static int km_ready = 0;
+static void km_init(void)
+{
+    if (km_ready) return;
+    km_ready = 1;
+    const char *a = "1234567890-=",  *A = "!@#$%^&*()_+";
+    for (int i = 0; i < 12; i++) { km[2 + i][0] = a[i]; km[2 + i][1] = A[i]; }
+    a = "qwertyuiop[]"; A = "QWERTYUIOP{}";
+    for (int i = 0; i < 12; i++) { km[16 + i][0] = a[i]; km[16 + i][1] = A[i]; }
+    a = "asdfghjkl;'"; A = "ASDFGHJKL:\"";
+    for (int i = 0; i < 11; i++) { km[30 + i][0] = a[i]; km[30 + i][1] = A[i]; }
+    km[41][0] = '`'; km[41][1] = '~';
+    km[43][0] = '\\'; km[43][1] = '|';
+    a = "zxcvbnm,./"; A = "ZXCVBNM<>?";
+    for (int i = 0; i < 10; i++) { km[44 + i][0] = a[i]; km[44 + i][1] = A[i]; }
+    km[57][0] = ' '; km[57][1] = ' ';
+    for (int i = 0; i < 10; i++) { km[79 + i][0] = '0' + i; km[79 + i][1] = '0' + i; }
+    km[71][0] = '7'; km[72][0] = '8'; km[73][0] = '9';
+    km[75][0] = '4'; km[76][0] = '5'; km[77][0] = '6';
+    km[79][0] = '1'; km[80][0] = '2'; km[81][0] = '3';
+    km[82][0] = '0'; km[83][0] = '.'; km[96][0] = '\n';
+    km[55][0] = '*'; km[74][0] = '-'; km[78][0] = '+'; km[98][0] = '/';
+}
+char aether_key_to_char(unsigned code, int shift)
+{
+    km_init();
+    if (code >= 128) return 0;
+    return shift ? km[code][1] : km[code][0];
+}
+unsigned aether_char_to_key(char c, int *shift_out)
+{
+    km_init();
+    if (shift_out) *shift_out = 0;
+    for (unsigned i = 0; i < 128; i++) if (km[i][0] && km[i][0] == c) return i;
+    for (unsigned i = 0; i < 128; i++) if (km[i][1] && km[i][1] == c) { if (shift_out) *shift_out = 1; return i; }
+    return 0;
+}
+
+/* ---- 主题色 ---- */
+static unsigned P_BG1, P_BG2, P_PANEL, P_TEXT, P_DIM, P_ACCENT, P_BORDER, P_BTN, P_BTNTX;
+static void theme_palette(void)
+{
+    if (g_theme == 1) {
+        P_BG1 = pack_rgb(226, 232, 240); P_BG2 = pack_rgb(150, 178, 214);
+        P_PANEL = pack_rgb(255, 255, 255); P_TEXT = pack_rgb(24, 30, 42);
+        P_DIM = pack_rgb(100, 112, 132); P_ACCENT = pack_rgb(0, 102, 204);
+        P_BORDER = pack_rgb(206, 214, 226); P_BTN = pack_rgb(228, 236, 246); P_BTNTX = pack_rgb(24, 30, 42);
+    } else {
+        P_BG1 = pack_rgb(10, 16, 34); P_BG2 = pack_rgb(8, 44, 66);
+        P_PANEL = pack_rgb(30, 38, 54); P_TEXT = pack_rgb(232, 238, 248);
+        P_DIM = pack_rgb(150, 164, 188); P_ACCENT = pack_rgb(70, 160, 255);
+        P_BORDER = pack_rgb(58, 72, 96); P_BTN = pack_rgb(46, 58, 82); P_BTNTX = pack_rgb(232, 238, 248);
+    }
+}
+
+/* ---- 窗口/应用管理 ---- */
+static void default_geometry(enum app_kind k, int *w, int *h)
+{
+    (void)k;
+    /* 手机应用全屏：内容区即屏幕减去状态栏与导航栏 */
+    *w = g_w;
+    *h = g_h - STATUS_H - NAV_H;
+}
+
+int aether_desktop_open(enum app_kind kind)
+{
+    /* 若该 kind 已有窗口则直接聚焦（相当于从主屏/多任务恢复） */
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (g_wins[i].used && g_wins[i].kind == kind) {
+            g_focus = g_wins[i].id;
+            int found = 0;
+            for (int j = 0; j < g_app_n; j++) if (g_app_order[j] == (int)kind) { found = 1; break; }
+            if (!found && g_app_n < MAX_WINDOWS) g_app_order[g_app_n++] = (int)kind;
+            g_state = PH_APP;
+            return g_wins[i].id;
+        }
+    }
+    int slot = -1;
+    for (int i = 0; i < MAX_WINDOWS; i++) if (!g_wins[i].used) { slot = i; break; }
+    if (slot < 0) { int low = 0; for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used) { slot = i; break; } }
+    struct aether_win *w = &g_wins[slot];
+    memset(w, 0, sizeof *w);
+    w->used = 1; w->id = g_next_id++; if (g_next_id > 100000) g_next_id = 1;
+    w->kind = kind;
+    snprintf(w->title, sizeof w->title, "%s", aether_app_name(kind));
+    default_geometry(kind, &w->w, &w->h);
+    w->x = 0; w->y = STATUS_H; w->maximized = 1;
+    g_focus = w->id;
+    aether_app_open(w);
+    if (g_app_n < MAX_WINDOWS) {
+        int dup = 0;
+        for (int j = 0; j < g_app_n; j++) if (g_app_order[j] == (int)kind) dup = 1;
+        if (!dup) g_app_order[g_app_n++] = (int)kind;
+    }
+    g_state = PH_APP;
+    return w->id;
+}
+void aether_desktop_close(int id)
+{
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        if (g_wins[i].used && g_wins[i].id == id) {
+            aether_app_close(&g_wins[i]);
+            enum app_kind k = g_wins[i].kind;
+            memset(&g_wins[i], 0, sizeof g_wins[i]);
+            for (int j = 0; j < g_app_n; j++) if (g_app_order[j] == (int)k) {
+                for (int m = j; m < g_app_n - 1; m++) g_app_order[m] = g_app_order[m + 1];
+                g_app_n--; break;
+            }
+        }
+    }
+    g_focus = 0;
+    for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used) g_focus = g_wins[i].id;
+    if (g_app_n == 0) g_state = PH_HOME;
+}
+struct aether_win *aether_desktop_window(int id)
+{
+    for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used && g_wins[i].id == id) return &g_wins[i];
+    return NULL;
+}
+struct aether_win *aether_desktop_focus(void) { return aether_desktop_window(g_focus); }
+void aether_desktop_invalidate(void) { }
+int aether_desktop_theme(void) { return g_theme; }
+void aether_desktop_set_theme(int t) { g_theme = t ? 1 : 0; }
+int aether_desktop_width(void) { return g_w; }
+int aether_desktop_height(void) { return g_h; }
+void aether_desktop_notify(const char *text) { (void)text; }
+
+void aether_desktop_init(int w, int h)
+{
+    g_w = w; g_h = h;
+    g_portrait = (h >= w);
+    int base = (w < h) ? w : h;          /* 短边 */
+    STATUS_H = base * 28 / 360 > 0 ? base * 28 / 360 : 28;
+    if (STATUS_H < 22) STATUS_H = 22; if (STATUS_H > 40) STATUS_H = 40;
+    NAV_H   = base * 60 / 360 > 0 ? base * 60 / 360 : 60;
+    if (NAV_H < 44) NAV_H = 44; if (NAV_H > 84) NAV_H = 84;
+    DOCK_H  = base * 110 / 360 > 0 ? base * 110 / 360 : 110;
+    if (DOCK_H < 88) DOCK_H = 88; if (DOCK_H > 140) DOCK_H = 140;
+    memset(g_wins, 0, sizeof g_wins);
+    g_focus = 0; g_next_id = 1; g_app_n = 0;
+    g_state = PH_LOCKED; g_notif = 0; g_theme = 0;
+    g_boot_t0 = (int)time(NULL);
+    g_mx = w / 2; g_my = h / 2;
+    km_init(); theme_palette();
+}
+
+/* ================= 渲染辅助 ================= */
+static int hit(int lx, int ly, int x, int y, int w, int h)
+{ return lx >= x && ly >= y && lx < x + w && ly < y + h; }
+
+static void draw_icon_tile(int cx, int cy, int size, int idx)
+{
+    unsigned col = aether_app_color((enum app_kind)idx);
+    int r = size * 22 / 100;
+    aether_draw_round_rect(cx, cy, size, size, r, col, 0xFF);
+    aether_draw_round_rect(cx + size*6/100, cy + size*6/100, size - size*12/100, size - size*12/100,
+                           r*3/4, pack_rgb(255,255,255), 36);
+    const char *s = aether_app_short((enum app_kind)idx);
+    int tw = aether_text_width_utf8(s);
+    aether_draw_text_utf8(cx + (size - tw)/2, cy + size*34/100, s, pack_rgb(255,255,255));
+    const char *n = aether_app_name((enum app_kind)idx);
+    char t[64]; int avail = size + 16; int wsum = 0, cut = 0;
+    for (int k = 0; n[k] && cut < 60; k++) {
+        int len = (unsigned char)n[k] < 0x80 ? 1 : 3;
+        char tmp[5]; memcpy(tmp, n + k, (size_t)len); tmp[len] = 0;
+        int cw = aether_text_width_utf8(tmp);
+        if (wsum + cw > avail) break;
+        memcpy(t + cut, n + k, (size_t)len); cut += len; wsum += cw; k += len - 1;
+    }
+    t[cut] = 0;
+    int nw = aether_text_width_utf8(t);
+    aether_draw_text_utf8(cx + (size - nw)/2, cy + size + 8, t, P_TEXT);
+}
+
+static void draw_status_bar(const char *clock)
+{
+    aether_fill_rect(0, 0, g_w, STATUS_H, g_theme == 1 ? pack_rgb(245,247,251) : pack_rgb(18,24,38));
+    aether_fill_rect(0, STATUS_H - 1, g_w, 1, P_BORDER);
+    char tbuf[32];
+    if (clock && clock[0]) snprintf(tbuf, sizeof tbuf, "%s", clock);
+    else snprintf(tbuf, sizeof tbuf, "--:--");
+    aether_draw_text_utf8(STATUS_H/2, (STATUS_H - 16)/2, tbuf, P_TEXT);
+    /* 右侧：电量（真实读取） + 离线标识（VM 无蜂窝/网络，诚实标注） */
+    int cap = 100;
+    FILE *f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
+    if (!f) f = fopen("/sys/class/power_supply/BAT1/capacity", "r");
+    if (f) { if (fscanf(f, "%d", &cap) != 1) cap = 100; fclose(f); }
+    if (cap < 0) cap = 100; if (cap > 100) cap = 100;
+    char rb[64];
+    snprintf(rb, sizeof rb, "离线  %d%%", cap);
+    int rw = aether_text_width_utf8(rb);
+    aether_draw_text_utf8(g_w - rw - STATUS_H/2, (STATUS_H - 16)/2, rb, P_DIM);
+}
+
+static void draw_nav_bar(void)
+{
+    int y0 = g_h - NAV_H;
+    aether_fill_rect(0, y0, g_w, NAV_H, g_theme == 1 ? pack_rgb(245,247,251) : pack_rgb(18,24,38));
+    aether_fill_rect(0, y0, g_w, 1, P_BORDER);
+    int cx = g_w/2;
+    int by = y0 + NAV_H/2;
+    /* 返回（三角） */
+    int bx0 = g_w*16/100;
+    aether_draw_text_utf8(bx0, by - 10, "<", P_TEXT);
+    /* 主页（圆） */
+    aether_draw_round_rect(cx - 14, by - 14, 28, 28, 14, P_BTN, 0xFF);
+    aether_draw_round_rect(cx - 11, by - 11, 22, 22, 11, P_DIM, 0xFF);
+    /* 多任务（方块） */
+    int bx2 = g_w*84/100 - 28;
+    aether_draw_round_rect(bx2, by - 12, 26, 24, 5, P_BTN, 0xFF);
+    aether_draw_round_rect(bx2 + 3, by - 9, 20, 18, 3, P_DIM, 0xFF);
+}
+
+static void draw_app_fullscreen(struct aether_win *w)
+{
+    int ch = g_h - STATUS_H - NAV_H;
+    aether_app_render(w, 0, STATUS_H, g_w, ch);
+}
+
+/* 主屏应用网格 */
+static void draw_home(void)
+{
+    int top = STATUS_H + 8;
+    int bottom = g_h - NAV_H - DOCK_H - 8;
+    /* 顶部搜索/天气胶囊 */
+    int pill_w = g_w - 32;
+    aether_draw_round_rect(16, top, pill_w, 40, 20, P_PANEL, 0xFF);
+    aether_draw_border(16, top, pill_w, 40, P_BORDER, 1);
+    aether_draw_text_utf8(28, top + 12, "应用 / 设置", P_DIM);
+
+    int grid_top = top + 52;
+    int grid_h = bottom - grid_top;
+    int g0 = 4;                        /* dock 已展示前 4 个，主网格展示其余应用，避免重复 */
+    int gcount = APP_COUNT - g0;
+    if (gcount < 0) gcount = 0;
+    int gcols = (g_w >= g_h) ? 5 : 4;
+    if (gcols > gcount && gcount > 0) gcols = gcount;
+    int grows = (gcount + gcols - 1) / gcols;
+    int gcell = (g_w - 24) / gcols;
+    int gisz = gcell * 62 / 100;
+    int rowh = grows ? grid_h / grows : grid_h;
+    if (gisz > rowh - 22) gisz = rowh - 22;
+    if (gisz < 40) gisz = 40;
+    for (int k = 0; k < gcount; k++) {
+        int i = g0 + k;
+        int c = k % gcols, r = k / gcols;
+        int gx = 12 + c * gcell + (gcell - gisz) / 2;
+        int gy = grid_top + r * rowh + (rowh - gisz) / 2;
+        draw_icon_tile(gx, gy, gisz, i);
+    }
+    /* 底部 Dock（前 4 个应用） */
+    int dy = g_h - NAV_H - DOCK_H;
+    aether_fill_rect(8, dy, g_w - 16, DOCK_H, P_PANEL);
+    aether_draw_round_rect(8, dy, g_w - 16, DOCK_H, 18, P_PANEL, 0xFF);
+    aether_draw_border(8, dy, g_w - 16, DOCK_H, P_BORDER, 1);
+    int dcell = (g_w - 32) / 4;
+    int disz = DOCK_H * 56 / 100;
+    for (int i = 0; i < 4 && i < APP_COUNT; i++) {
+        int gx = 16 + i * dcell + (dcell - disz) / 2;
+        int gy = dy + (DOCK_H - disz) / 2 - 6;
+        draw_icon_tile(gx, gy, disz, i);
+    }
+}
+
+/* 锁屏 */
+static void draw_lock(const char *clock)
+{
+    aether_draw_vgradient(0, 0, g_w, g_h, pack_rgb(6,12,28), pack_rgb(4,30,52));
+    time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
+    char big[16], date[64];
+    snprintf(big, sizeof big, "%02d:%02d", tm.tm_hour, tm.tm_min);
+    const char *wd[7] = {"周日","周一","周二","周三","周四","周五","周六"};
+    snprintf(date, sizeof date, "%04d年%02d月%02d日 %s", tm.tm_year+1900, tm.tm_mon+1, tm.tm_mday, wd[tm.tm_wday]);
+    int bw = aether_text_width(big);
+    int fs = g_w * 120 / 360; if (fs < 64) fs = 64; if (fs > 140) fs = 140;
+    aether_draw_text_scale(big, g_w/2 - bw*fs/32/2, g_h*30/100, fs, pack_rgb(240,246,255));
+    int dw = aether_text_width_utf8(date);
+    aether_draw_text_utf8(g_w/2 - dw/2, g_h*30/100 + fs + 14, date, pack_rgb(170,200,228));
+    /* 解锁提示 */
+    char hint[64];
+    snprintf(hint, sizeof hint, "点击屏幕任意处解锁  ·  AetherOS 手机版");
+    int hw = aether_text_width_utf8(hint);
+    aether_draw_text_utf8(g_w/2 - hw/2, g_h*72/100, hint, pack_rgb(150,178,210));
+    aether_draw_text_utf8(g_w/2 - aether_text_width_utf8("以太操作系统 · 安全虚拟手机")/2, g_h - STATUS_H - 30,
+                          "以太操作系统 · 安全虚拟手机", pack_rgb(120,150,185));
+}
+
+/* 通知栏 */
+static void draw_notif(void)
+{
+    int ph = g_h * 62 / 100;
+    aether_fill_rect_alpha(0, STATUS_H, g_w, ph, g_theme==1?pack_rgb(255,255,255):pack_rgb(28,34,50), 250);
+    aether_draw_border(0, STATUS_H, g_w, ph, P_BORDER, 1);
+    aether_draw_text_utf8(20, STATUS_H + 14, "通知", P_TEXT);
+    int y = STATUS_H + 52;
+    const char *items[3] = {
+        "系统：AetherOS 手机版已就绪",
+        "安全：运行于独立虚拟机，与宿主隔离",
+        "提示：从顶部状态栏下拉可收起通知"
+    };
+    for (int i = 0; i < 3; i++) {
+        aether_draw_round_rect(14, y, g_w - 28, 46, 10, g_theme==1?pack_rgb(240,244,250):pack_rgb(40,48,66), 0xFF);
+        char t[96]; int avail = g_w - 56;
+        int wsum=0, cut=0;
+        for (int k = 0; items[i][k] && cut < 90; k++) {
+            int len = (unsigned char)items[i][k] < 0x80 ? 1 : 3;
+            char tmp[5]; memcpy(tmp, items[i]+k, (size_t)len); tmp[len]=0;
+            int cw = aether_text_width_utf8(tmp);
+            if (wsum + cw > avail) break;
+            memcpy(t + cut, items[i]+k, (size_t)len); cut += len; wsum += cw; k += len - 1;
+        }
+        t[cut] = 0;
+        aether_draw_text_utf8(26, y + 14, t, P_TEXT);
+        y += 56;
+    }
+}
+
+/* 多任务卡片 */
+static void draw_recents(void)
+{
+    aether_fill_rect_alpha(0, 0, g_w, g_h, g_theme==1?pack_rgb(220,226,236):pack_rgb(10,14,26), 220);
+    aether_draw_text_utf8(20, STATUS_H + 10, "最近任务", P_TEXT);
+    int card_w = g_w - 60, card_h = (g_h - NAV_H - STATUS_H - 80) / (g_app_n > 0 ? g_app_n : 1) - 12;
+    if (card_h > 140) card_h = 140; if (card_h < 60) card_h = 60;
+    int y = STATUS_H + 44;
+    for (int i = 0; i < g_app_n; i++) {
+        enum app_kind k = (enum app_kind)g_app_order[i];
+        aether_draw_round_rect(30, y, card_w, card_h, 12, g_theme==1?pack_rgb(255,255,255):pack_rgb(36,44,62), 0xFF);
+        aether_draw_border(30, y, card_w, card_h, P_BORDER, 1);
+        unsigned col = aether_app_color(k);
+        aether_draw_round_rect(46, y + (card_h-44)/2, 44, 44, 10, col, 0xFF);
+        const char *s = aether_app_short(k);
+        int tw = aether_text_width_utf8(s);
+        aether_draw_text_utf8(46 + (44-tw)/2, y + (card_h-44)/2 + 14, s, pack_rgb(255,255,255));
+        aether_draw_text_utf8(104, y + card_h/2 - 10, aether_app_name(k), P_TEXT);
+        /* 关闭按钮 */
+        aether_draw_round_rect(30 + card_w - 40, y + 10, 30, 30, 8, P_BTN, 0xFF);
+        aether_draw_text_utf8(30 + card_w - 40 + 9, y + 16, "X", P_DIM);
+        y += card_h + 12;
+    }
+    if (g_app_n == 0) aether_draw_text_utf8(40, STATUS_H + 90, "暂无最近任务", P_DIM);
+}
+
+void aether_desktop_render(const char *clock, double cpu, double mem)
+{
+    (void)cpu; (void)mem;
+    theme_palette();
+    aether_render_clear_clip();
+    /* 锁屏 3 秒后自动解锁（便于自动化与演示，真实设备也可点击解锁）。
+       必须在 PH_LOCKED 早期返回之前判断，否则永远走不到这里。 */
+    if (g_state == PH_LOCKED && (int)time(NULL) - g_boot_t0 >= 3) g_state = PH_HOME;
+    if (g_state == PH_LOCKED) {
+        draw_lock(clock);
+        draw_status_bar(clock);
+        aether_draw_cursor(g_mx, g_my);
+        return;
+    }
+    /* 壁纸 */
+    aether_draw_vgradient(0, 0, g_w, g_h, P_BG1, P_BG2);
+    if (g_state == PH_HOME) draw_home();
+    else if (g_state == PH_APP) {
+        struct aether_win *f = aether_desktop_focus();
+        if (f) draw_app_fullscreen(f); else draw_home();
+    }
+    draw_status_bar(clock);
+    if (g_notif) draw_notif();
+    if (g_state == PH_RECENTS) draw_recents();
+    if (g_state != PH_LOCKED) draw_nav_bar();
+    aether_draw_cursor(g_mx, g_my);
+}
+
+/* ================= 输入分发 ================= */
+static void unlock(void) { if (g_state == PH_LOCKED) g_state = PH_HOME; }
+static void go_home(void) { if (g_state != PH_LOCKED) { g_state = PH_HOME; g_notif = 0; } }
+static void toggle_notif(void) { if (g_state != PH_LOCKED) g_notif = g_notif ? 0 : 1; }
+static void go_recents(void) { if (g_state != PH_LOCKED) g_state = (g_state == PH_RECENTS) ? PH_HOME : PH_RECENTS; }
+static void back_in_app(void) {
+    if (g_state == PH_APP) {
+        /* 返回主页但保留应用在后台（与 Android 一致），多任务里仍可看到 */
+        g_state = PH_HOME;
+    } else if (g_state == PH_RECENTS) g_state = PH_HOME;
+}
+
+static void handle_home_tap(int x, int y)
+{
+    int top = STATUS_H + 8;
+    int bottom = g_h - NAV_H - DOCK_H - 8;
+    int pill_w = g_w - 32;
+    if (hit(x, y, 16, top, pill_w, 40)) { /* 搜索胶囊：打开设置（占位） */
+        aether_desktop_open(APP_SETTINGS); return;
+    }
+    int grid_top = top + 52;
+    int grid_h = bottom - grid_top;
+    int g0 = 4;                        /* 与 draw_home 一致：主网格展示 dock 之外的应用 */
+    int gcount = APP_COUNT - g0;
+    int gcols = (g_w >= g_h) ? 5 : 4;
+    if (gcols > gcount && gcount > 0) gcols = gcount;
+    int grows = (gcount + gcols - 1) / gcols;
+    int gcell = (g_w - 24) / gcols;
+    int gisz = gcell * 62 / 100;
+    int rowh = grows ? grid_h / grows : grid_h;
+    if (gisz > rowh - 22) gisz = rowh - 22;
+    if (gisz < 40) gisz = 40;
+    for (int k = 0; k < gcount; k++) {
+        int i = g0 + k;
+        int c = k % gcols, r = k / gcols;
+        int gx = 12 + c * gcell + (gcell - gisz) / 2;
+        int gy = grid_top + r * rowh + (rowh - gisz) / 2;
+        if (hit(x, y, gx - 6, gy - 6, gisz + 12, gisz + 26)) { aether_desktop_open((enum app_kind)i); return; }
+    }
+    /* Dock */
+    int dy = g_h - NAV_H - DOCK_H;
+    int dcell = (g_w - 32) / 4;
+    int disz = DOCK_H * 56 / 100;
+    for (int i = 0; i < 4 && i < APP_COUNT; i++) {
+        int gx = 16 + i * dcell + (dcell - disz) / 2;
+        int gy = dy + (DOCK_H - disz) / 2 - 6;
+        if (hit(x, y, gx - 6, gy - 6, disz + 12, disz + 26)) { aether_desktop_open((enum app_kind)i); return; }
+    }
+}
+
+static void handle_nav_tap(int x, int y)
+{
+    (void)y;
+    int y0 = g_h - NAV_H;
+    if (y < y0) return;
+    int bx0 = g_w*16/100, cx = g_w/2, bx2 = g_w*84/100 - 28;
+    if (hit(x, y, bx0 - 20, y0, 60, NAV_H)) {           /* 返回 */
+        if (g_state == PH_APP) back_in_app();
+        else if (g_state == PH_RECENTS) go_home();
+        return;
+    }
+    if (hit(x, y, cx - 24, y0, 48, NAV_H)) { go_home(); return; }  /* 主页 */
+    if (hit(x, y, bx2 - 16, y0, 60, NAV_H)) { go_recents(); return; } /* 多任务 */
+}
+
+static void handle_app_tap(int x, int y)
+{
+    if (y < STATUS_H || y >= g_h - NAV_H) return;
+    struct aether_win *f = aether_desktop_focus();
+    if (!f) return;
+    int ch = g_h - STATUS_H - NAV_H;
+    aether_app_click(f, x - 0, y - STATUS_H, g_w, ch);
+}
+
+static void handle_recents_tap(int x, int y)
+{
+    int card_w = g_w - 60, card_h = (g_h - NAV_H - STATUS_H - 80) / (g_app_n > 0 ? g_app_n : 1) - 12;
+    if (card_h > 140) card_h = 140; if (card_h < 60) card_h = 60;
+    int yy = STATUS_H + 44;
+    for (int i = 0; i < g_app_n; i++) {
+        enum app_kind k = (enum app_kind)g_app_order[i];
+        if (hit(x, y, 30 + card_w - 40, yy + 10, 30, 30)) {  /* 关闭 */
+            for (int j = 0; j < MAX_WINDOWS; j++) if (g_wins[j].used && g_wins[j].kind == k)
+                aether_desktop_close(g_wins[j].id);
+            if (g_app_n == 0) g_state = PH_HOME;
+            return;
+        }
+        if (hit(x, y, 30, yy, card_w, card_h)) { aether_desktop_open(k); return; }
+        yy += card_h + 12;
+    }
+    if (x < 30 || x > 30 + card_w) g_state = PH_HOME;
+}
+
+void aether_desktop_button(int x, int y, int down)
+{
+    g_mx = x; g_my = y;
+    if (!down) return;   /* 触摸/鼠标：按下即记录，释放由合成器立即补发 down=0；此处只在按下时处理点击 */
+    /* 锁屏：任意点击解锁 */
+    if (g_state == PH_LOCKED) { unlock(); return; }
+    /* 状态栏区域：切换通知栏 */
+    if (y < STATUS_H) { toggle_notif(); return; }
+    /* 导航栏区域 */
+    if (y >= g_h - NAV_H) { handle_nav_tap(x, y); return; }
+    /* 通知栏展开时，点击面板之外即收起 */
+    if (g_notif) {
+        int ph = g_h * 62 / 100;
+        if (!(y >= STATUS_H && y < STATUS_H + ph)) { g_notif = 0; return; }
+        return; /* 面板内点击忽略 */
+    }
+    if (g_state == PH_HOME) { handle_home_tap(x, y); return; }
+    if (g_state == PH_APP) { handle_app_tap(x, y); return; }
+    if (g_state == PH_RECENTS) { handle_recents_tap(x, y); return; }
+}
+
+void aether_desktop_motion(int x, int y) { g_mx = x; g_my = y; }
+
+void aether_desktop_key(unsigned code, int shift)
+{
+    if (code == 1 /* ESC */) { go_home(); return; }
+    if (g_state == PH_APP) {
+        struct aether_win *f = aether_desktop_focus();
+        if (f) aether_app_key(f, code, shift);
+    }
+}
+
+/* ================= 状态与 IPC ================= */
+void aether_desktop_state(char *buf, size_t sz)
+{
+    int n = 0; enum app_kind fk = APP_COUNT;
+    struct aether_win *f = aether_desktop_focus();
+    if (f) fk = f->kind;
+    for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used) n++;
+    size_t o = 0;
+    o += (size_t)snprintf(buf + o, sz - o,
+        "{\"state\":%d,\"app\":%d,\"notif\":%d,\"locked\":%d,\"theme\":%d,\"open\":%d,\"wins\":[",
+        g_state, (int)fk, g_notif, (g_state==PH_LOCKED)?1:0, g_theme, g_app_n);
+    int first = 1;
+    for (int i = 0; i < MAX_WINDOWS; i++) {
+        struct aether_win *w = &g_wins[i];
+        if (!w->used) continue;
+        o += (size_t)snprintf(buf + o, sz - o,
+            "%s{\"id\":%d,\"kind\":%d}", first ? "" : ",", w->id, (int)w->kind);
+        first = 0;
+    }
+    snprintf(buf + o, sz - o, "]}");
+}
+
+void aether_desktop_ipc(const char *line, char *reply, size_t sz)
+{
+    char cmd[32];
+    if (sscanf(line, "%31s", cmd) != 1) { snprintf(reply, sz, "{\"ok\":false}\n"); return; }
+    if (!strcmp(cmd, "state")) {
+        aether_desktop_state(reply, sz);
+        size_t L = strlen(reply); reply[L] = '\n'; reply[L+1] = 0;
+        return;
+    }
+    if (!strcmp(cmd, "skipboot") || !strcmp(cmd, "unlock")) { unlock(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
+    if (!strcmp(cmd, "home")) { go_home(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
+    if (!strcmp(cmd, "back")) { back_in_app(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
+    if (!strcmp(cmd, "recents")) { go_recents(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
+    if (!strcmp(cmd, "notif")) { toggle_notif(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
+    if (!strcmp(cmd, "move") || !strcmp(cmd, "click") || !strcmp(cmd, "down") || !strcmp(cmd, "up")) {
+        int x = 0, y = 0;
+        sscanf(line, "%*s %d %d", &x, &y);
+        if (!strcmp(cmd, "move")) { g_mx = x; g_my = y; }
+        else if (!strcmp(cmd, "click")) { g_mx = x; g_my = y; aether_desktop_button(x, y, 1); aether_desktop_button(x, y, 0); }
+        else if (!strcmp(cmd, "down")) { g_mx = x; g_my = y; aether_desktop_button(x, y, 1); }
+        else { aether_desktop_button(x, y, 0); }
+        snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
+    if (!strcmp(cmd, "key")) {
+        unsigned code = 0; int shift = 0;
+        sscanf(line, "%*s %u %d", &code, &shift);
+        aether_desktop_key(code, shift);
+        snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
+    if (!strcmp(cmd, "text")) {
+        const char *s = line + 4; while (*s == ' ') s++;
+        for (int i = 0; s[i] && s[i] != '\r' && s[i] != '\n'; i++) {
+            int shift = 0; unsigned code = aether_char_to_key(s[i], &shift);
+            if (code) aether_desktop_key(code, shift);
+        }
+        snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
+    if (!strcmp(cmd, "open")) {
+        int k = 0; sscanf(line, "%*s %d", &k);
+        if (k >= 0 && k < APP_COUNT) {
+            unlock(); int id = aether_desktop_open((enum app_kind)k);
+            snprintf(reply, sz, "{\"ok\":true,\"id\":%d}\n", id);
+        } else snprintf(reply, sz, "{\"ok\":false}\n");
+        return;
+    }
+    if (!strcmp(cmd, "closeall")) {
+        for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used) aether_desktop_close(g_wins[i].id);
+        g_state = PH_HOME; g_notif = 0;
+        snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
+    snprintf(reply, sz, "unknown\n");
+}
