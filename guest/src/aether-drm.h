@@ -1,5 +1,5 @@
 /*
- * aether-drm.h - AetherOS PC 的 KMS/DRM 显示后端（原子提交 + 双缓冲）
+ * aether-drm.h - AetherOS 的 KMS/DRM 显示后端（原子提交 + 双缓冲）
  *
  * 抽象出一张可翻页的显示平面：调用方渲染到 back_buffer，
  * 然后 present() 把该缓冲翻到屏幕；翻页完成事件通过 handle_events() 回收。

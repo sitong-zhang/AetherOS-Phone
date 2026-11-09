@@ -1,11 +1,11 @@
 /*
- * aether-drm.c - AetherOS PC 的 KMS/DRM 显示后端实现
+ * aether-drm.c - AetherOS 的 KMS/DRM 显示后端实现
  *
  * 采用 DRM 原子接口完成模式设置（modeset）与翻页（page flip）。
  * 双缓冲：两个 dumb 帧缓冲轮流作为 front/back，present 触发原子翻页，
  * 翻页完成事件通过 handle_events() 回收并交换 back 指针。
  *
- * 这是 PC 原生实现，与手机基线无共享代码。已修正前次移植中
+ * 显示后端实现，供 host 取证构建与客机共用；已修正前次移植中
  * poll 数组越界、跳过 IPC 轮询等结构性缺陷。
  */
 #include "aether-drm.h"

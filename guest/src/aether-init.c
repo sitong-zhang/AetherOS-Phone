@@ -1,5 +1,5 @@
 /*
- * aether-init.c - AetherOS PC 的 PID 1 服务管理器
+ * aether-init.c - AetherOS 的 PID 1 服务管理器
  *
  * 这是电脑操作系统的第一个用户态进程，职责：
  *   1. 挂载基础文件系统（proc/sys/dev/tmp/run）并设主机名
@@ -267,7 +267,7 @@ static void handle_exit(pid_t pid, int status)
 int main(void)
 {
     early_setup();
-    aether_log("init", "AetherOS PC 启动 (PID 1)");
+    aether_log("init", "AetherOS 启动 (PID 1)");
 
     /* 加载服务配置（使用 dirent 遍历） */
     {

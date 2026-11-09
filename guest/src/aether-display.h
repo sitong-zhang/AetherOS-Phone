@@ -1,5 +1,5 @@
 /*
- * aether-display.h - AetherOS PC 统一显示后端
+ * aether-display.h - AetherOS 统一显示后端
  *
  * 抽象出「一块可上屏的像素缓冲」：调用方渲染到 back 缓冲，
  * present() 把缓冲上屏。后端自动选择：

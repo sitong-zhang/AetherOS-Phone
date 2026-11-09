@@ -60,8 +60,9 @@ void aether_render_init(unsigned char *bits, int w, int h, int pitch)
     g.w = w;
     g.h = h;
     g.pitch = pitch;
-    g.cursor_x = w / 2;
-    g.cursor_y = h / 2;
+    /* 仅记录最后触点坐标（EV_ABS 分轴上报时累积用），不绘制任何指针 */
+    g.touch_x = w / 2;
+    g.touch_y = h / 2;
 }
 
 void aether_render_set_target(unsigned char *bits) { g.bits = bits; }
@@ -74,14 +75,14 @@ void aether_render_framebuffer(unsigned char **bits, int *w, int *h, int *pitch)
     if (pitch) *pitch = g.pitch;
 }
 
-void aether_render_set_cursor(int x, int y)
+void aether_render_set_touch(int x, int y)
 {
-    if (x >= 0 && x < g.w) g.cursor_x = x;
-    if (y >= 0 && y < g.h) g.cursor_y = y;
+    if (x >= 0 && x < g.w) g.touch_x = x;
+    if (y >= 0 && y < g.h) g.touch_y = y;
 }
 
-int aether_render_cursor_x(void) { return g.cursor_x; }
-int aether_render_cursor_y(void) { return g.cursor_y; }
+int aether_render_touch_x(void) { return g.touch_x; }
+int aether_render_touch_y(void) { return g.touch_y; }
 
 static inline void set_px(int x, int y, unsigned rgb)
 {
@@ -397,23 +398,8 @@ void aether_draw_logo(int cx, int cy, int size)
     }
 }
 
-static const unsigned short CURSOR[16] = {
-    0x8000, 0xC000, 0xE000, 0xF000, 0xF800, 0xFC00, 0xFE00, 0xFF00,
-    0xFF80, 0xFFC0, 0xEFF0, 0xFFF8, 0xBFF8, 0x7FE0, 0x3F80, 0x00E0,
-};
-
-void aether_draw_cursor(int x, int y)
-{
-    for (int row = 0; row < 16; row++) {
-        unsigned short bits = CURSOR[row];
-        for (int col = 0; col < 16; col++) {
-            if (bits & (0x8000 >> col)) {
-                set_px(x + col, y + row, pack_rgb(20, 20, 24));
-                set_px(x + col + 1, y + row, pack_rgb(255, 255, 255));
-            }
-        }
-    }
-}
+/* PC 方案已废弃：鼠标指针位图与 aether_draw_cursor() 整体移除。
+ * 本系统只支持触摸输入与触控手势，界面内不出现任何指针。 */
 
 /* ==================== 画布快照 / 位块传送 ====================
  * 供转场视差使用；逐像素读写遵守边界。真算模糊与液态玻璃材质
@@ -472,21 +458,5 @@ void aether_blit_rect(unsigned *buf, int x, int y, int w, int h, unsigned char a
 
 void aether_free_capture(unsigned *buf) { free(buf); }
 
-/* ---- 旧版静态欢迎页（保留兼容，新桌面不再使用） ---- */
-void aether_render_desktop(const char *clock, double cpu, double mem, int win)
-{
-    aether_draw_vgradient(0, 0, g.w, g.h, pack_rgb(12, 18, 34), pack_rgb(8, 34, 48));
-    aether_fill_rect_alpha(0, 0, g.w, 30, 0x000000, 150);
-    aether_draw_text(12, 7, "AetherOS", pack_rgb(255, 255, 255));
-    char right[64];
-    snprintf(right, sizeof right, "CPU %4.1f%%  MEM %4.1f%%  %s", cpu, mem, clock ? clock : "");
-    aether_draw_text(g.w - (int)strlen(right) * AETHER_FONT_W - 12, 7, right, pack_rgb(200, 230, 255));
-    int cx = g.w / 2, cy = g.h / 2 - 30;
-    aether_draw_logo(cx, cy, 150);
-    const char *name = "AetherOS";
-    aether_draw_text(cx - (int)strlen(name) * AETHER_FONT_W / 2, cy + 95, name, pack_rgb(235, 245, 255));
-    const char *sub = "x86_64 Desktop Operating System";
-    aether_draw_text(cx - (int)strlen(sub) * AETHER_FONT_W / 2, cy + 118, sub, pack_rgb(150, 190, 220));
-    (void)win;
-    aether_draw_cursor(g.cursor_x, g.cursor_y);
-}
+/* 旧版「x86_64 Desktop」静态欢迎页已删除：该项目不存在 PC 版本，
+ * 且该页曾是唯一的指针绘制点。手机壳由 aether-phone.c 提供。 */

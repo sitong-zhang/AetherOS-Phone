@@ -16,9 +16,8 @@ mkdir -p "$OUT/sbin" "$OUT/bin"
 # -rdynamic 保留，便于崩溃时回溯符号可读。
 FLAGS="-static -O2 -Wall -Wextra -I$SRC -DAETHER_NO_DRM -rdynamic"
 
-# 外壳：phone（竖屏手机操作系统，默认）
-SHELL_SRC="${AETHER_SHELL:-phone}"
-if [ "$SHELL_SRC" = "desktop" ]; then SHELL_SRC=aether-desktop.c; else SHELL_SRC=aether-phone.c; fi
+# 外壳：本项目只存在手机形态（aether-phone.c），PC 桌面方案已彻底废弃。
+SHELL_SRC=aether-phone.c
 
 echo "[build-aarch64] 工具链: $CC"
 echo "[build-aarch64] aether-init"

@@ -1,5 +1,5 @@
 /*
- * aether-log.c - AetherOS PC 共享日志实现
+ * aether-log.c - AetherOS 共享日志实现
  *
  * 仅依赖 libc，使用单调时钟计算相对启动秒数，避免时区问题。
  * 所有输出走 fd=2（stderr），由 PID1 在 boot 早期把 fd=2 重定向到

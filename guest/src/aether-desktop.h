@@ -1,5 +1,5 @@
 /*
- * aether-desktop.h - AetherOS 桌面外壳（窗口管理 / 任务栏 / 开始菜单 / 输入分发）
+ * aether-desktop.h - AetherOS 桌面服务内核共享 API（窗口 / 应用 / 输入分发）
  */
 #ifndef AETHER_DESKTOP_H
 #define AETHER_DESKTOP_H

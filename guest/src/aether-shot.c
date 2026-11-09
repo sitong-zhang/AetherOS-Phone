@@ -1,5 +1,5 @@
 /*
- * aether-shot.c - AetherOS PC 截图客户端
+ * aether-shot.c - AetherOS 截图客户端
  * 用法：aether-shot <path.ppm>
  * 连接到合成器 IPC，请求把当前上屏帧导出为 PPM。
  */

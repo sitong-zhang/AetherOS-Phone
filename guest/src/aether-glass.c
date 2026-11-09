@@ -13,17 +13,22 @@
  *       <- Kyant0  RoundedRectRefractionWithDispersionShaderString
  *   glass_highlight
  *       <- Kyant0  DefaultHighlightShaderString + HighlightStyle.Default
- *                  (angle=45°/135°, falloff=1, White alpha .5, Plus 混合)
+ *                  (angle=45°, falloff=1, White alpha .5, Plus 混合)
  *   glass_saturate / LUMA_WEIGHTS
  *       <- sdegenaar  shaders/render.glsl  applySaturation (Rec.709)
+ *   glass_apply_glass_color
+ *       <- sdegenaar  shaders/render.glsl  applyGlassColor（adaptive 亮度保持）
  *   gaussian 通道 IIR 递推 (w *= g1; g1 *= g2)
  *       <- sdegenaar  shaders/progressive_blur.frag
  *   参数默认值
  *       <- sdegenaar  glass_defaults.dart / liquid_glass_settings.dart
+ *       <- Kyant0    app/.../LiquidButton.kt（折射 H/A）
  *   三档降级 premium / standard / minimal
  *       <- sdegenaar  lib/types/glass_quality.dart + 总纲第七章
  *   层级规则「Glass 只用于浮层/导航，内容不透明」「不嵌套折射」
- *       <- sdegenaar  README / SKILL.md
+ *       <- sdegenaar  README / SKILL.md（见 aether-glass-spec.h）
+ *
+ * 逐条核对：third_party/liquid-glass/MAPPING.md
  */
 #include "aether-glass.h"
 #include "aether-render.h"
@@ -138,6 +143,61 @@ void glass_saturate(float *r, float *g, float *b, float saturation)
     *r = L + (*r - L) * saturation;
     *g = L + (*g - L) * saturation;
     *b = L + (*b - L) * saturation;
+}
+
+/* applyGlassColor (adaptive / Glass.regular) <- sdegenaar shaders/render.glsl
+ *
+ * iOS 26 模型：彩色玻璃保持背景亮度、只移动色相；无色玻璃趋向白。
+ * 原 shader 在 0..1 域运算，此处等价换算到 0..255 域（亮度同域、chroma 归一）。
+ *
+ *   directMix      = mix(liquid, glass, a)
+ *   backdropLuma   = dot(liquid, LUMA_WEIGHTS)
+ *   glassLuma      = dot(glass,  LUMA_WEIGHTS)
+ *   tinted         = clamp(glass + (backdropLuma - glassLuma), 0, 255)
+ *   chroma         = max(glass) - min(glass)              （0..255）
+ *   chromaWeight   = clamp(chroma / 255 * 8, 0, 1)        （锐利爬升）
+ *   luminosityMix  = mix(liquid, tinted, a)
+ *   result         = mix(directMix, luminosityMix, chromaWeight)
+ *
+ * 旧实现只是普通 alpha 混合却标注「亮度保持」，此函数补上真实语义。 */
+static inline float clamp255(float v)
+{
+    if (v < 0.0f) return 0.0f;
+    if (v > 255.0f) return 255.0f;
+    return v;
+}
+
+void glass_apply_glass_color(float *r, float *g, float *b,
+                             float tr, float tg, float tb, float a)
+{
+    /* directMix */
+    float dr = *r + (tr - *r) * a;
+    float dg = *g + (tg - *g) * a;
+    float db = *b + (tb - *b) * a;
+
+    /* 亮度保持着色 */
+    float backdrop_luma = GLASS_LUMA_R * *r + GLASS_LUMA_G * *g + GLASS_LUMA_B * *b;
+    float glass_luma    = GLASS_LUMA_R * tr  + GLASS_LUMA_G * tg  + GLASS_LUMA_B * tb;
+    float delta = backdrop_luma - glass_luma;
+    float cr = clamp255(tr + delta);
+    float cg = clamp255(tg + delta);
+    float cb = clamp255(tb + delta);
+
+    /* chroma 基于 glassColor【原始值】<- render.glsl：
+     *   max(glassColor.rgb) - min(glassColor.rgb)
+     * 不能用 tinted 后的 cr/cg/cb，否则无色玻璃会被误判为有彩度。 */
+    float mx = tr > tg ? tr : tg; if (tb > mx) mx = tb;
+    float mn = tr < tg ? tr : tg; if (tb < mn) mn = tb;
+    float chroma_weight = (mx - mn) / 255.0f * 8.0f;
+    if (chroma_weight > 1.0f) chroma_weight = 1.0f;
+
+    float lr = *r + (cr - *r) * a;
+    float lg = *g + (cg - *g) * a;
+    float lb = *b + (cb - *b) * a;
+
+    *r = dr + (lr - dr) * chroma_weight;
+    *g = dg + (lg - dg) * chroma_weight;
+    *b = db + (lb - db) * chroma_weight;
 }
 
 /* 7 段色散权重 <- RoundedRectRefractionWithDispersionShaderString
@@ -317,7 +377,9 @@ static void glass_composite(int x, int y, int w, int h,
     float rad = (float)rect_radius;
     if (rad > hx) { rad = hx; }
     if (rad > hy) { rad = hy; }
-    float angle = (float)(GLASS_LIGHT_ANGLE_DEG * 3.14159265358979 / 180.0);
+    /* 高光法线夹角 <- Kyant0 HighlightStyle.Default.angle = 45f
+     * （GLASS_LIGHT_ANGLE_DEG 135° 是 sdegenaar 的光照方向，属另一量，不混用） */
+    float angle = (float)(GLASS_HIGHLIGHT_ANGLE_DEG * 3.14159265358979 / 180.0);
     float tr = (tint >> 16) & 0xFF, tg = (tint >> 8) & 0xFF, tb = tint & 0xFF;
     float ta = (float)tint_a / 255.0f;
     float hr = (highlight_rgb >> 16) & 0xFF;
@@ -357,21 +419,64 @@ static void glass_composite(int x, int y, int w, int h,
             /* Rec.709 亮度保持饱和度 <- render.glsl */
             glass_saturate(&R, &G, &B, GLASS_SATURATION);
 
-            /* 法线高光（Plus 混合，白 alpha .5）<- DefaultHighlightShaderString */
+            /* 法线高光（Plus 混合，White alpha .5）<- Kyant0 DefaultHighlightShaderString
+             * 光照强度 2.0 属 sdegenaar 的 directional lighting 模型，本 C 实现
+             * 未引入该项，故不在此混乘，避免又一次跨库混搭。 */
             float gx, gy;
             glass_grad_rrect(cx, cy, hx, hy, rad, &gx, &gy);
-            float hi = glass_highlight(gx, gy, angle, GLASS_HIGHLIGHT_FALLOFF) * 0.5f;
+            float hi = glass_highlight(gx, gy, angle, GLASS_HIGHLIGHT_FALLOFF)
+                       * GLASS_HIGHLIGHT_ALPHA;
             R += hr * hi; G += hg * hi; B += hb * hi;
 
-            /* 色调罩：亮度保持着色 <- applyGlassColor adaptive + 总纲 5.4 */
-            R = tr * ta + R * (1.0f - ta);
-            G = tg * ta + G * (1.0f - ta);
-            B = tb * ta + B * (1.0f - ta);
+            /* 色调罩：亮度保持着色 <- render.glsl applyGlassColor（adaptive）
+             * 旧实现为普通 alpha 混合却标注亮度保持，此处改为真实语义。 */
+            glass_apply_glass_color(&R, &G, &B, tr, tg, tb, ta);
 
             px_set(x + i, y + j, pack3(R, G, B));
         }
     }
     rgb_free(t); rgb_free(s);
+}
+
+/* ---- 磨砂遮罩快路径（供桌面壁纸分层使用） ----
+ * 只做「降采样 -> 可分离高斯 IIR -> 双线性放大」，结果写入调用方 dst
+ * （XRGB8888，dst_pitch 字节/行），不触碰画布。刻意跳过 glass_composite
+ * 的逐像素 SDF / 折射 / 7 段色散 / 法线高光 pow() / 亮度保持着色：那套
+ * 循环在 720x1280 上是 92 万次重浮点运算，ARM64 TCG 会长时间占住串行 IPC
+ * 主循环，watchdog 收不到 ping 的 pong 会误杀合成器。
+ * 三个步骤全部复用上游 progressive_blur.frag 对应的 downsample /
+ * gaussian_axis / sample_small，非自研。 */
+void aether_glass_blur_veil(unsigned char *dst, int dst_pitch,
+                            int x, int y, int w, int h, int radius)
+{
+    if (!dst || w <= 0 || h <= 0) return;
+    glass_bind_framebuffer();
+    if (!g_bits) return;
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > g_fw) w = g_fw - x;
+    if (y + h > g_fh) h = g_fh - y;
+    if (w <= 0 || h <= 0 || dst_pitch < (x + w) * 4) return;
+
+    struct rgb_buf *s = downsample(x, y, w, h);
+    if (!s) return;
+    struct rgb_buf *t = rgb_alloc(s->w, s->h);
+    if (!t) { rgb_free(s); return; }
+    float sigma = (float)radius / (float)GLASS_DOWN;
+    if (sigma < 0.5f) sigma = 0.5f;
+    gaussian_axis(s, t, sigma, 1);
+    gaussian_axis(t, s, sigma, 0);      /* s = 最终模糊小图 */
+    rgb_free(t);
+
+    for (int j = 0; j < h; j++) {
+        unsigned *row = (unsigned *)(dst + (size_t)(y + j) * dst_pitch);
+        for (int i = 0; i < w; i++) {
+            float R, G, B;
+            sample_small(s, (float)i, (float)j, &R, &G, &B);
+            row[x + i] = pack3(R, G, B);
+        }
+    }
+    rgb_free(s);
 }
 
 /* ---- 公开 API ---- */

@@ -1,9 +1,12 @@
 /*
- * aether-render.h - AetherOS PC 软件合成渲染层
+ * aether-render.h - AetherOS 手机软件合成渲染层
  *
  * CPU 逐像素绘制到 DRM/fbdev 双缓冲（XRGB8888），不依赖任何图形库。
- * 提供：基础图元、ASCII 8x16 与 CJK 16x16 混合排版、控件图元、
- *       系统图标（Tux，取自 gilbarbara/logos）、光标。
+ * 提供：基础图元、ASCII/CJK 混合排版、控件图元、系统图标、液态玻璃材质。
+ *
+ * 输入形态：仅触摸（EV_ABS 绝对坐标 + BTN_TOUCH + 触控手势）。
+ * PC 方案已废弃，本层不提供、不绘制任何鼠标指针；touch_x/touch_y 仅记录
+ * 最后一个触点坐标，供 EV_ABS 分轴上报时累积与命中测试使用，不产生视觉指针。
  */
 #ifndef AETHER_RENDER_H
 #define AETHER_RENDER_H
@@ -14,12 +17,12 @@ struct render_fb {
     unsigned char *bits;
     int w, h;
     int pitch;
-    int cursor_x, cursor_y;
+    int touch_x, touch_y;      /* 最后触点坐标（非指针，不绘制） */
 };
 
 void aether_render_init(unsigned char *bits, int w, int h, int pitch);
 void aether_render_set_target(unsigned char *bits);
-void aether_render_set_cursor(int x, int y);
+void aether_render_set_touch(int x, int y);
 
 /* 只读查询当前画布（供液态玻璃等需要逐像素采样下层的材质模块使用） */
 void aether_render_framebuffer(unsigned char **bits, int *w, int *h, int *pitch);
@@ -28,8 +31,8 @@ void aether_render_framebuffer(unsigned char **bits, int *w, int *h, int *pitch)
  * 无需为每个控件单独传 alpha。绘制完务必复位 255。 */
 void aether_render_set_alpha(unsigned char a);
 unsigned char aether_render_alpha(void);
-int  aether_render_cursor_x(void);
-int  aether_render_cursor_y(void);
+int  aether_render_touch_x(void);
+int  aether_render_touch_y(void);
 
 /* px = 0xFFRRGGBB；小端写入内存序 [B,G,R,0xFF]，与 DRM/fbdev 一致 */
 static inline unsigned pack_rgb(unsigned char r, unsigned char g, unsigned char b)
@@ -79,11 +82,7 @@ void aether_draw_round_rect(int x, int y, int w, int h, int r,
                             unsigned rgb, unsigned char alpha);
 void aether_draw_vgradient(int x, int y, int w, int h, unsigned top, unsigned bot);
 
-/* ---- 图标/光标 ---- */
+/* ---- 图标 ----（无光标/指针绘制，PC 方案已废弃） */
 void aether_draw_logo(int cx, int cy, int size);
-void aether_draw_cursor(int x, int y);
-
-/* 旧版静态欢迎页，保留兼容（新版桌面不再调用） */
-void aether_render_desktop(const char *clock, double cpu, double mem, int win);
 
 #endif /* AETHER_RENDER_H */

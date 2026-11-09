@@ -1,34 +1,37 @@
-# AGENTS.md — AetherOS（电脑版）工程指引
+# AGENTS.md — AetherOS Phone 客机工程指引
 
-面向接手本工程的 AI Agent。本工程是一个**从零构建的 x86_64 电脑操作系统**，
-与手机版（另一独立仓库）**代码互不复用**，仅共享名字 AetherOS 与图标。
+面向接手本工程的 AI Agent。本目录是 **AetherOS 手机版的客机用户态源码**，不是 PC
+发行版：项目只存在手机形态，PC 桌面方案已彻底废弃，界面内不绘制任何鼠标指针。
 
 ## 一句话定位
 
-`AetherOS PC` = Linux 6.6.70 (x86_64) 内核 + 自有用户态（init / 守护 / DRM 合成器 / 看门狗），
-可在 QEMU 中以可启动 ext4 镜像运行，桌面渲染出品牌 logo。
+`AetherOS Phone` = aarch64 Linux 6.6.70 内核（由 `aether-vm` 工程提供）+ 本目录纯 C
+静态链接用户态（init / 守护 / 合成器 / 看门狗 / 手机外壳），由 Android APK 内的 QEMU
+引擎加载 `system.qcow2` 开机，合成器直接写 `/dev/fb0` 出桌面。
 
 ## 构建链路（顺序不可乱）
 
-1. `build-pc.sh` — 静态编译 `src/*.c` 到 `build-pc/root/{sbin,bin}`。
-   需 `libdrm` 开发头文件（`apt-get install libdrm-dev`）与 `gcc`。
-   合成器链接 `-ldrm`（旧版 libdrm 用 `drmModeCreateDumbBuffer` 而非 `drmModeCreateDumb`，代码已适配）。
-2. `build-busybox-pc.sh` — 构建静态 busybox 到 `build-pc/busybox/_install`。
-   若已有种子（提交/缓存）则跳过下载。
-3. `make_rootfs_pc.sh` — 把 busybox + 自有二进制 + 服务配置 + 脚本组装进 staging 目录，
-   再用 `mke2fs -d <dir>` 生成 ext4 镜像（**无需 loop 挂载**）。
-   已禁用 `metadata_csum` 以便必要时用工具检查。镜像默认 320MB，落到 `/tmp/aether-pc-build/`。
-4. `boot-pc.sh` — 启动 QEMU（`-kernel` + `-drive` rootfs + `virtio-gpu` + 键鼠/平板 + 9p 共享）。
-   默认无头（`-nographic -serial stdio`），`--gui` 开 gtk 窗口。
+1. `build-aarch64.sh` — aarch64 静态交叉编译全部用户态，产物默认落在
+   `/root/aether-archive/aether-aarch64-build/root/`。
+   系统盘注入源固定为同级的 `root-full/sbin/aether-compositor`；改完源码后必须用
+   `AETHER_BUILD=/root/aether-archive/aether-aarch64-build/root-full bash build-aarch64.sh`
+   重编，否则 `make_system_v6.sh` 仍注入旧二进制。
+2. `/workspace/aether-vm/make_system_v6.sh` — 从干净的 v5 基线盘重打 v6：注入前先
+   `e2fsck -fy` 清空 ext4 journal，注入后复修复检，并对 7 个文件做 SHA-256 + 权限
+   硬校验。**直接对带 `needs_recovery` 的盘做 `debugfs -w` 会导致客机 exec 崩溃
+   （rc=139）**，这是历史根因，不要绕过前置 e2fsck。
+3. `/workspace/aether-vm/host/run_v6.sh` — 编译自研 `aether-vm`，用 QEMU TCG 真实
+   开机，串口日志与 9p 导出的逐帧 PPM 落在 `out/run-v6/`，脚本自动转 PNG。
+
+`build-host.sh` 只做 host x86_64 原生静态编译验证（需 `libdrm-dev`），不产出可启动镜像。
 
 ## 服务模型（aether-init）
 
 `aether-init`（PID 1）解析 `/etc/aether/init.d/<svc>`，格式为极简 `key=value`：
 `name= / exec= / depends= / restart=(never|on-failure|always)`。
-它按依赖拓扑启动服务、阻塞回收子进程、按策略重启。
-已定义服务：`aetherosd` → `aether-compositor`（依赖前者）→ `aether-watchdog`（依赖前者）、
-`bootdiag`（一次性诊断）、`pcshot`（经 9p 导出首屏截图）。
-服务状态写入 `/run/aether/services.tsv`（**必须在 tmpfs /run 挂载之后创建 /run/aether**）。
+按依赖拓扑启动服务、阻塞回收子进程、按策略重启。
+服务状态写入 `/run/aether/services.tsv`（**必须在 tmpfs /run 挂载之后创建
+`/run/aether`**，否则会被新 tmpfs 覆盖）。
 
 ## 关键源文件
 
@@ -36,23 +39,37 @@
 |------|------|
 | `src/aether-init.c` | PID 1 服务管理器 |
 | `src/aetherosd.c` | 系统守护 / AetherBus（`/run/aetheros.sock`） |
-| `src/aether-compositor.c` | 合成器主循环：输入 + IPC + 渲染调度 |
-| `src/aether-drm.c/h` | KMS/DRM 原子提交、双缓冲（virtio-gpu） |
-| `src/aether-render.c/h` | 桌面合成：壁纸/顶栏/logo/文字/光标 |
-| `src/aether-watchdog.c` | 心跳探活，连续 3 次超时才杀进程 |
-| `src/aether-font.h` | 内嵌 8x16 位图字体（数据资产） |
+| `src/aether-compositor.c` | 合成器主循环：触摸输入 + IPC + 渲染调度 |
+| `src/aether-display.c` / `aether-drm.c` | fbdev / KMS 双后端 |
+| `src/aether-render.c/h` | 软渲染原语：填充 / 文字 / 图标 / 圆角 / 模糊 |
+| `src/aether-vfont.c/h` + `stb_truetype.h` | 内嵌矢量 TrueType 栅格化 |
+| `src/aether-glass.c/h` | Liquid Glass 光学与合成 |
+| `src/aether-glass-spec.h` | 上游组件规范固化的 C 常量与层级规则 |
+| `src/aether-phone.c` | 唯一外壳实现（锁屏 / 主屏 / 导航 / 通知 / 多任务） |
+| `src/aether-desktop.h` | 桌面服务内核共享 API（内部命名，非 PC 产品形态） |
 
 ## 常见坑（已踩过，勿重蹈）
 
 - **平面类型属性名是小写 `type`**（内核属性），不是 `TYPE`；否则 `get_prop_id` 查不到、
   `DRM_PLANE_TYPE_PRIMARY` 永远不匹配 → “未找到主平面”。代码已加兜底（取覆盖本 CRTC 的首平面）。
 - **`/run/aether` 必须在 `mount tmpfs /run` 之后创建**，否则目录被新 tmpfs 覆盖，状态文件写不进去。
-- 合成器 `poll` 数组要按实际 fd 数动态分配，**不可写死 4**（当年加鼠标 EV_REL 后第 5 个 fd 越界，
+- 合成器 `poll` 数组要按实际 fd 数动态分配，**不可写死 4**（历史上第 5 个输入 fd 越界，
   触发 `__poll_chk` 栈溢出 SIGABRT）。
 - 渲染后**必须回到 `poll` 服务 IPC**，不可 `continue` 跳过，否则看门狗心跳连不上会被误杀。
 - 截图把整缓冲一次性 `fwrite`，**不可逐像素写**（9p + TCG 下极慢/卡死）。
+- 矢量字体 blob 由 `objcopy` 生成，链接 compositor 必须带 `-Wl,-z,noexecstack`，
+  否则报 `missing .note.GNU-stack section implies executable stack`。
+- `glass_apply_glass_color()` 的彩度判定必须基于上游原始 `glassColor` 的 `tr/tg/tb`，
+  不能用已着色的中间值，否则无色玻璃会被误判为彩色。
 
-## 渲染验证（无头）
+## 输入约定
 
-启动后看宿主机 `/tmp/aether-pc-share/pc-shot.ppm`（1280×720 PPM，2,764,800 字节）。
-用 `python3` 扫描应出现荧光绿 `A`（约数千像素）与亮蓝胶囊；中心 logo 包围盒应居中 (~640,360)。
+只识别 `EV_ABS`（`ABS_X` / `ABS_Y`）+ `BTN_TOUCH` 与 `EV_KEY`；`EV_REL` / `REL_X` /
+`REL_Y` / `BTN_LEFT` 路径已整体移除。`status` IPC 返回 `touch:[x,y]`，不再是 `cursor`。
+渲染层只记录 `touch_x/touch_y` 供分轴累积与命中测试，不绘制任何指针。
+
+## 渲染验证
+
+`run_v6.sh` 结束后查看 `out/run-v6/frames/*.png` 与 `out/run-v6/serial.log`；
+断言串口出现 `SELFTEST_DONE=1`、compositor 显示 `backend=1`（fbdev），且无
+`rc=139` / `segfault` / `EXT4-fs error` / `Structure needs cleaning` 命中。

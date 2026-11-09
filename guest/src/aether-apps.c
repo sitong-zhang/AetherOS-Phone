@@ -205,7 +205,7 @@ static void term_exec(struct app_state *st, const char *raw)
         return;
     }
     if (!strcmp(s, "about")) {
-        term_push(st, "AetherOS 以太操作系统 x86_64 桌面版");
+        term_push(st, "AetherOS 以太操作系统 手机版");
         term_push(st, "Linux 6.6.70 内核 + BusyBox + 自研图形桌面");
         return;
     }
@@ -598,7 +598,7 @@ void app_monitor_click(struct aether_win *w, int lx, int ly, int cw, int ch, str
 /* ==================== 关于本机 ==================== */
 void app_about_open(struct app_state *st)
 {
-    snprintf(st->status, sizeof st->status, "AetherOS 以太操作系统 · 桌面发行版");
+    snprintf(st->status, sizeof st->status, "AetherOS 以太操作系统 · 手机版");
 }
 
 void app_about_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
@@ -606,7 +606,7 @@ void app_about_render(struct aether_win *w, int ox, int oy, int cw, int ch, stru
     (void)w;
     aether_draw_logo(ox + 92, oy + 92, 150);
     aether_ui_label(ox + 190, oy + 34, "AetherOS 以太操作系统", C_TEXT);
-    aether_ui_label(ox + 190, oy + 58, "x86_64 桌面版 · Desktop Distribution", C_DIM);
+    aether_ui_label(ox + 190, oy + 58, "手机版 · Phone Edition", C_DIM);
     aether_ui_label(ox + 190, oy + 82, "基于 Linux 6.6.70 内核构建", C_DIM);
     aether_ui_label(ox + 190, oy + 104, "用户态：BusyBox + AetherOS 自研图形栈", C_DIM);
     int y = oy + 172;

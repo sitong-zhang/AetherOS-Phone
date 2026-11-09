@@ -13,9 +13,8 @@ mkdir -p "$OUT/sbin" "$OUT/bin"
 # 不引用 /usr/include/libdrm（该头文件在 aarch64 交叉环境不存在）。
 FLAGS="-static -O2 -Wall -Wextra -I$SRC -DAETHER_NO_DRM -DAETHER_MINIMAL -rdynamic -pthread"
 
-# 外壳：phone（竖屏手机操作系统，默认）
-SHELL_SRC="${AETHER_SHELL:-phone}"
-if [ "$SHELL_SRC" = "desktop" ]; then SHELL_SRC=aether-desktop.c; else SHELL_SRC=aether-phone.c; fi
+# 外壳：本项目只存在手机形态（aether-phone.c），PC 桌面方案已彻底废弃。
+SHELL_SRC=aether-phone.c
 
 echo "[build-aarch64] 工具链: $CC"
 echo "[build-aarch64] aether-init"

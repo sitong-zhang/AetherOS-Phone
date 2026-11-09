@@ -27,9 +27,10 @@ AetherOS 是一个从零构建的 ARM64 Linux 手机操作系统：**Linux 6.6.7
 - 阶段 5 断言链已在 v6 系统盘上通过全系统 QEMU TCG 真机级闭环复跑：逐帧取证、`SELFTEST_STAGE5_DONE=1`、compositor 全程在线（fbdev 720×1280）、无崩溃与文件系统错误。验证入口 `vm/host/run_v6.sh`。
 - **矢量字体**：客机文字已从 16×16 点阵升级为内嵌 TrueType 矢量字体（`guest/assets/aether-font.ttf`，Noto Sans CJK SC 的 OFL 修改版子集，7720 码点），由 `stb_truetype` 做抗锯齿灰度栅格化。保持 8/16px 布局格不变，按基线换算修复了文字底部裁切；字体以 `objcopy` 静态链入合成器，不作为系统盘内的独立文件。许可证与采用理由见 [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md)。
 - **应用内更新**：APK 内置「系统更新」界面，读取公开 GitHub Releases latest 接口获取版本与资产摘要，下载后按 `sha256:` digest 校验，再经自研 `ContentProvider` 以 `content://` 交给系统安装器。入口位于系统诊断浮层与崩溃报告页。该模块只访问公开接口，不内置任何访问凭证。
+- **界面整改**：按用户指定的两个液态玻璃开源仓库（`Kyant0/AndroidLiquidGlass`、`sdegenaar/liquid_glass_widgets`）原样纳入源码快照、许可证与逐条对照表，修正此前参数错标与跨库混用；客机已整体移除 PC / 鼠标光标路径，界面内不绘制任何指针，输入只识别 `EV_ABS` + `BTN_TOUCH` 与键盘。桌面重建为「底层真实壁纸 + 上层磨砂玻璃遮罩」，搜索栏、小组件、Dock、状态栏、通知中心、控制中心、应用抽屉与最近任务均接入上游圆角、双层阴影、镜面高光、触控按压与转场时长规范；矢量字体已修复文字底部裁切。详见 [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md)。
 - **构建边界**：APK 打包依赖本机预置的外部资产（内核 Image、系统盘、SDL2/QEMU 动态库闭包、Android SDK/NDK），这些大二进制不纳入本仓库；仓库内暂未提供一键可复现的完整构建。后续工作项之一是把资产生成脚本化并接入 CI。
-- **交付阶段**：当前为内部调试阶段，系统尚未对外发布。版本通过 GitHub Release 分发，供应用内更新器读取；本仓库不提供面向公众的宣传页面。
-- 尚未完成：总纲后续章节、真机下载安装与升级链路验证。
+- **交付渠道**：仅本 GitHub 仓库（源码与 GitHub Release）。独立公网发布页已废弃、不再维护。当前为内部调试阶段，系统尚未对外正式发布；Release 资产供应用内更新器读取。
+- 尚未完成：界面规范的全页面逐项审计（应用内页面、转场与阴影的逐页对照）、Android 兼容层（AVF / pKVM + LXC / AOSP）、真机下载安装与升级链路的端到端验证，以及总纲后续章节。
 
 ## 开源归属
 

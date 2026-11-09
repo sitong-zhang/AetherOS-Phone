@@ -1,5 +1,5 @@
 /*
- * aether-watchdog.c - AetherOS PC 健康看门狗
+ * aether-watchdog.c - AetherOS 健康看门狗
  *
  * 职责：对关键服务做心跳探测，发现持续无响应（卡死）的进程并发信号，
  * 交由 init（restart=always）自动重启。
@@ -9,7 +9,7 @@
  *   - 仅当连续 MISS_LIMIT 次（默认 3）心跳全部超时，才判定为卡死并 kill；
  *   - 杀掉的是具体 pid，不碰其他服务。
  *
- * 这是 PC 原生实现，与手机基线无共享代码。
+ * 用户态守护实现，host 与客机共用同一套源码。
  */
 #include "aether-log.h"
 

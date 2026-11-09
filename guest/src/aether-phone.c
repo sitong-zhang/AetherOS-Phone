@@ -43,6 +43,9 @@ static int g_app_from_x, g_app_from_y, g_app_from_s;  /* 启动动效起点（�
 static int g_last_state = 0, g_last_panel = 0, g_last_drawer = 0, g_last_page = 0;
 
 static void sync_anim_starts(void);   /* 定义在全局状态声明之后 */
+static void ensure_wall_veil(void);   /* 磨砂玻璃遮罩层，定义在壁纸段之后 */
+static void draw_glass_platter(int x, int y, int w, int h, int r,
+                               int role, int pressed);
 
 /* ---- 几何（按短边比例自适应） ---- */
 static int g_w, g_h;
@@ -72,6 +75,17 @@ static int  g_glass_valid = 0;
 static unsigned g_glass_key = 0;
 static unsigned g_glass_gen = 0;     /* 下层画面代数 */
 static char g_glass_wall[256] = "";  /* 当前壁纸路径（变化时使缓存失效） */
+
+/* 磨砂玻璃遮罩层缓存（总纲 6.1 四层分离：背景→内容→导航/控制→浮层）。
+ * 底层是清晰壁纸；这里对壁纸做一次真算模糊得到「磨砂壁纸盘子」，控件只从
+ * 这块盘子取自己下方的像素，绝不逐控件重复模糊。ARM64 TCG 上逐帧全屏可分离
+ * 高斯 IIR 会长时间占住串行 IPC 主循环导致 watchdog 误杀（见 draw_overlay_backdrop）。
+ * 只在壁纸 / 主题 / 尺寸 / 换页变化（g_glass_gen）时重算一次。 */
+static unsigned char *g_veil = NULL;
+static int  g_veil_pitch = 0;
+static int  g_veil_rows  = 0;
+static int  g_veil_valid = 0;
+static unsigned g_veil_key = 0;
 
 /* 桌面分页：4 页容纳 14 个内置应用（空位用 -1 表示，桌面网格留白属正常布局）。
  * 商店安装的应用写入空槽（APP_EMPTY），卸载时清空（阶段 5 安装闭环）。 */
@@ -191,7 +205,8 @@ static long g_toast_t0 = 0;
 static void aether_desktop_toast(const char *s)
 { snprintf(g_toast, sizeof g_toast, "%s", s); g_toast_t0 = (long)time(NULL); }
 
-/* 鼠标/触点（无指针形态下不绘制光标，仅记录） */
+/* 最后触点坐标：仅用于 EV_ABS 分轴上报累积与命中测试；
+ * 本系统只支持触摸输入，界面内不绘制任何鼠标指针或光标。 */
 static int g_mx = 0, g_my = 0;
 
 /* ---- 窗口/应用管理 ---- */
@@ -210,17 +225,17 @@ static void sync_anim_starts(void)
 {
     if (g_page != g_last_page) {
         g_page_dir = g_page > g_last_page ? 1 : -1;
-        aether_anim_begin(&g_an_page, 260);
+        aether_anim_begin(&g_an_page, GLASS_ANIM_MS);        /* 200 <- glass_defaults.dart */
         g_last_page = g_page;
         g_glass_gen++;              /* 下层桌面换页，玻璃盘子需重算 */
     }
     if (g_panel != g_last_panel) {
-        if (g_panel) aether_anim_begin(&g_an_panel, 300);
+        if (g_panel) aether_anim_begin(&g_an_panel, GLASS_ANIM_SLOW_MS);  /* 300 */
         g_last_panel = g_panel;
         g_glass_gen++;              /* 浮层开/合：一次新会话，重算一次 */
     }
     if (g_drawer != g_last_drawer) {
-        if (g_drawer) aether_anim_begin(&g_an_drawer, 320);
+        if (g_drawer) aether_anim_begin(&g_an_drawer, GLASS_MATERIALIZE_MS); /* 250 */
         g_last_drawer = g_drawer;
         g_glass_gen++;
     }
@@ -302,7 +317,7 @@ int aether_desktop_open(enum app_kind kind)
             for (int j = 0; j < g_app_n; j++) if (g_app_order[j] == (int)kind) { found = 1; break; }
             if (!found && g_app_n < MAX_WINDOWS) g_app_order[g_app_n++] = (int)kind;
             g_drawer = 0; g_panel = 0; g_state = PH_APP;
-            aether_anim_begin(&g_an_app, 300);
+            aether_anim_begin(&g_an_app, GLASS_MATERIALIZE_MS);   /* 250 */
             return g_wins[i].id;
         }
     }
@@ -510,13 +525,23 @@ static void draw_app_tile(int kind, int x, int y, int size)
     aether_draw_icon_tile(id, x, y, size, glass,
                           pack_rgb(255, 255, 255),
                           aether_app_name((enum app_kind)kind), P_TEXT);
+    /* 触控按压反馈：按下提亮（上游 GLASS_AMBIENT_LIGHT_*），松开回落 */
+    if (g_pressed && g_mx >= x && g_mx < x + size
+        && g_my >= y && g_my < y + size) {
+        float lift = g_theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
+        aether_draw_round_rect(x, y, size, size, (int)(size * 0.22f),
+                               pack_rgb(255, 255, 255),
+                               (unsigned char)(int)(lift * 255.0f));
+    }
 }
 
 /* 状态栏：左侧时间；右侧信号/Wi-Fi/蓝牙/电量，全部单色同线宽开源图标 */
 static void draw_status_bar(const char *clock)
 {
-    aether_fill_rect(0, 0, g_w, STATUS_H, g_theme == 1 ? pack_rgb(246, 248, 252) : pack_rgb(16, 22, 38));
-    aether_fill_rect(0, STATUS_H - 1, g_w, 1, P_BORDER);
+    /* 导航层玻璃底：半透明磨砂，底部一条高光线，不再是纯色块 */
+    aether_fill_rect_alpha(0, 0, g_w, STATUS_H,
+                           g_theme == 1 ? pack_rgb(240, 246, 255) : pack_rgb(10, 18, 34), 0xB4);
+    aether_fill_rect_alpha(0, STATUS_H - 1, g_w, 1, pack_rgb(255, 255, 255), 0x24);
     char tbuf[32];
     snprintf(tbuf, sizeof tbuf, "%s", (clock && clock[0]) ? clock : "--:--");
     aether_draw_text_utf8(STATUS_H / 2, (STATUS_H - 16) / 2, tbuf, P_TEXT);
@@ -544,8 +569,9 @@ static void draw_status_bar(const char *clock)
 static void draw_nav_bar(void)
 {
     int y0 = g_h - NAV_H;
-    aether_fill_rect(0, y0, g_w, NAV_H, g_theme == 1 ? pack_rgb(246, 248, 252) : pack_rgb(16, 22, 38));
-    aether_fill_rect(0, y0, g_w, 1, P_BORDER);
+    aether_fill_rect_alpha(0, y0, g_w, NAV_H,
+                           g_theme == 1 ? pack_rgb(240, 246, 255) : pack_rgb(10, 18, 34), 0xB4);
+    aether_fill_rect_alpha(0, y0, g_w, 1, pack_rgb(255, 255, 255), 0x24);
     int by = y0 + NAV_H / 2;
     int is = NAV_H * 40 / 100; if (is < 20) is = 20;
     unsigned ic = P_TEXT;
@@ -564,12 +590,16 @@ static void draw_app_fullscreen(struct aether_win *w)
 static void draw_search_pill(int top)
 {
     int pw = g_w - 32;
-    aether_draw_round_rect(16, top, pw, 44, 22, P_GLASS, 0xD8);
-    aether_draw_border(16, top, pw, 44, P_BORDER, 1);
-    aether_draw_icon(AE_ICON_SEARCH, 28, top + 10, 24, P_DIM);
-    aether_draw_text_utf8(62, top + 14, "搜索应用与内容", P_DIM);
+    int ph = (int)GLASS_H_INPUT;                 /* 48 <- glass_defaults.dart */
+    int pressed = g_pressed && g_mx >= 16 && g_mx < 16 + pw
+                  && g_my >= top && g_my < top + ph;
+    draw_glass_platter(16, top, pw, ph, (int)GLASS_RADIUS_CAPSULE > ph / 2
+                       ? ph / 2 : (int)GLASS_RADIUS_CAPSULE,
+                       GLASS_ROLE_NAV, pressed);
+    aether_draw_icon(AE_ICON_SEARCH, 28, top + (ph - 24) / 2, 24, P_DIM);
+    aether_draw_text_utf8(62, top + (ph - 16) / 2, "搜索应用与内容", P_DIM);
     int is = 22;
-    aether_draw_icon(AE_ICON_LAYOUT_GRID, 16 + pw - 34, top + 11, is, P_DIM);
+    aether_draw_icon(AE_ICON_LAYOUT_GRID, 16 + pw - 34, top + (ph - is) / 2, is, P_DIM);
 }
 
 /* 桌面壁纸：读取图片查看器「设为壁纸」写入的真实配置，解码 PPM 像素铺满画布。
@@ -583,13 +613,19 @@ static void draw_wallpaper(void)
 {
     char path[256] = "";
     FILE *f = fopen("/data/aether/wallpaper.conf", "r");
-    if (!f) return;
-    if (fgets(path, sizeof path, f)) {
-        size_t L = strlen(path);
-        while (L && path[L - 1] < 32) path[--L] = 0;
+    if (f) {
+        if (fgets(path, sizeof path, f)) {
+            size_t L = strlen(path);
+            while (L && path[L - 1] < 32) path[--L] = 0;
+        }
+        fclose(f);
     }
-    fclose(f);
-    if (!path[0]) return;
+    /* 内置默认壁纸：配置缺失时也让壁纸真正上屏，而不是退化成单调渐变。
+     * 深浅主题各取一套成套壁纸，保证图标文字可读（总纲 5.5 / 5.17）。 */
+    if (!path[0])
+        snprintf(path, sizeof path, "%s",
+                 g_theme == 1 ? "/usr/share/aether/wallpapers/wall-02.ppm"
+                              : "/usr/share/aether/wallpapers/wall-01.ppm");
     if (strcmp(path, g_glass_wall)) {
         snprintf(g_glass_wall, sizeof g_glass_wall, "%s", path);
         g_glass_gen++;          /* 「设为壁纸」真实生效：下层变化，玻璃盘子需重算 */
@@ -611,11 +647,182 @@ static void draw_wallpaper(void)
     aether_fill_rect_alpha(0, 0, g_w, g_h, pack_rgb(0, 0, 0), 34);
 }
 
+/* ---- 磨砂玻璃遮罩层 + 玻璃控件盘子（总纲 6.1 / 第七章性能降级） ----
+ * 底层：清晰壁纸（draw_wallpaper）。
+ * 遮罩层：对壁纸做一次真算模糊得到「磨砂壁纸盘子」g_veil（可分离高斯 IIR，
+ *         照搬 sdegenaar progressive_blur.frag），控件只从盘子取自己下方的像素。
+ * 内容层：图标 / 文字保持不透明。
+ * 导航/控制层：玻璃控件 = 磨砂底 + 双层阴影 + 高光边 + 按压提亮。
+ *
+ * 半径 / 阴影 / 按压 / 高光 / 时长全部取自 aether-glass-spec.h（上游开源规范），
+ * 不自行设定。遵守 "Glass is a Platter, Not a Wrapper" 与 "NEVER Nest
+ * Refractive Glass"：本盘子只做磨砂、不做折射，父层亦不嵌套折射玻璃。 */
+/* 磨砂壁纸盘子只依赖【壁纸内容 + 主题 + 画布尺寸】，不依赖换页 / 浮层 /
+ * 面板开合等瞬时状态。按上游 "Glass is a Platter, Not a Wrapper"，这块盘子
+ * 在整个桌面会话里只算一次，绝不能随 g_glass_gen 逐帧重算：ARM64 TCG 上
+ * 每次整屏可分离高斯 IIR 会长时间占住串行 IPC 主循环，watchdog 的 ping
+ * 收不到 pong 会误杀合成器（见 draw_overlay_backdrop 的历史排障结论）。 */
+static unsigned veil_cache_key(void)
+{
+    unsigned h = 2166136261u;              /* FNV-1a over 当前壁纸路径 */
+    const unsigned char *p = (const unsigned char *)g_wall_path;
+    for (; *p; p++) { h ^= *p; h *= 16777619u; }
+    return h + (unsigned)g_theme * 977u
+             + (unsigned)g_w * 104729u
+             + (unsigned)g_h * 1299709u;
+}
+
+static void ensure_wall_veil(void)
+{
+    unsigned key = veil_cache_key();
+    if (g_veil_valid && key == g_veil_key && g_veil
+        && g_veil_rows == g_h && g_veil_pitch == g_w * 4) return;
+
+    unsigned char *bits = NULL; int fw = 0, fh = 0, pitch = 0;
+    aether_render_framebuffer(&bits, &fw, &fh, &pitch);
+    if (!bits || pitch < g_w * 4 || fh < g_h || g_w <= 0 || g_h <= 0) return;
+
+    if (!g_veil || g_veil_rows != g_h || g_veil_pitch != g_w * 4) {
+        free(g_veil);
+        g_veil_pitch = g_w * 4;
+        g_veil_rows  = g_h;
+        g_veil = (unsigned char *)malloc((size_t)g_h * g_veil_pitch);
+    }
+    if (!g_veil) return;
+
+    /* 纯模糊快路径：把「对壁纸真算可分离高斯」的结果直接写进遮罩缓冲，
+     * 画布保持清晰壁纸不变。整程只算一次，且跳过完整玻璃合成的 92 万次
+     * 逐像素重浮点循环 —— 这是避免 watchdog 误杀合成器的关键。 */
+    aether_glass_blur_veil(g_veil, g_veil_pitch, 0, 0, g_w, g_h,
+                           (int)GLASS_BLUR_DEFAULT + 2);
+    g_veil_key = key; g_veil_valid = 1;
+}
+
+/* 玻璃控件盘子：r 为圆角；role 决定层级是否允许玻璃；pressed 为触控按下态。
+ * 双层阴影反向裁剪：先画外扩阴影，再用玻璃覆盖中心，阴影只留在边界之外。 */
+static void draw_glass_platter(int x, int y, int w, int h, int r,
+                               int role, int pressed)
+{
+    if (w <= 0 || h <= 0) return;
+    if (r > h / 2) r = h / 2;
+    if (r < 0) r = 0;
+    int glass = glass_role_allows_glass(role);
+
+    unsigned char *bits = NULL; int fw = 0, fh = 0, pitch = 0;
+    aether_render_framebuffer(&bits, &fw, &fh, &pitch);
+
+    /* 双层阴影（glass_shadow.dart）：elevation 约 6% 黑 / blur 8 / dy 2，
+     * contact 约 2% 黑 / blur 2 / dy 1。 */
+    /* ARGB 常量的 alpha 在最高字节：取 >>24。此前误用 &0xFF 恒得 0，
+     * 导致两层阴影实际不可见，玻璃控件缺失阴影分层。 */
+    unsigned char elev_a = (unsigned char)((GLASS_SHADOW_ELEV_ARGB >> 24) & 0xFFu);
+    unsigned char cont_a = (unsigned char)((GLASS_SHADOW_CONTACT_ARGB >> 24) & 0xFFu);
+    aether_draw_round_rect(x - GLASS_SHADOW_ELEV_BLUR / 2,
+                           y + GLASS_SHADOW_ELEV_DY,
+                           w + GLASS_SHADOW_ELEV_BLUR, h, r + 2,
+                           pack_rgb(0, 0, 0), elev_a);
+    aether_draw_round_rect(x - GLASS_SHADOW_CONTACT_BLUR / 2,
+                           y + GLASS_SHADOW_CONTACT_DY,
+                           w + GLASS_SHADOW_CONTACT_BLUR, h, r,
+                           pack_rgb(0, 0, 0), cont_a);
+
+    /* 镜面高光边：外扩 1px 的半透明白，形成一圈柔和亮边 */
+    int spec_a = (int)((g_theme == 1 ? GLASS_SPECULAR_LIGHT
+                                     : GLASS_SPECULAR_DARK) * 255.0f);
+    aether_draw_round_rect(x - 1, y - 1, w + 2, h + 2, r + 1,
+                           pack_rgb(255, 255, 255), (unsigned char)spec_a);
+
+    /* 磨砂玻璃底：从盘子逐行按圆角裁切贴上（真实模糊过的壁纸，非静态贴图）。
+     * 圆角之外保留清晰壁纸，形成「控件区磨砂 / 其余清晰」的分层。 */
+    if (glass && g_veil && g_veil_valid && bits && pitch >= g_w * 4) {
+        for (int j = 0; j < h; j++) {
+            int yy = y + j;
+            if (yy < 0 || yy >= g_h) continue;
+            int inset = 0;
+            if (r > 0) {
+                int dy = (j < r) ? (r - j)
+                       : (j > h - 1 - r) ? (r - (h - 1 - j)) : 0;
+                if (dy > 0 && dy <= r) {
+                    float v = (float)(r * r - dy * dy);
+                    if (v > 0) inset = r - (int)sqrtf(v);
+                    else inset = r;
+                }
+            }
+            int xa = x + inset, xb = x + w - inset;
+            if (xa < 0) xa = 0;
+            if (xb > g_w) xb = g_w;
+            if (xb > xa)
+                memcpy(bits + (size_t)yy * pitch + (size_t)xa * 4,
+                       g_veil + (size_t)yy * g_veil_pitch + (size_t)xa * 4,
+                       (size_t)(xb - xa) * 4);
+        }
+    } else {
+        aether_draw_round_rect(x, y, w, h, r, P_GLASS, 0xE0);
+    }
+
+    /* 玻璃色调罩：半透明主题色，让磨砂壁纸透出但不抢内容 */
+    unsigned tint = g_theme == 1 ? pack_rgb(236, 242, 252) : pack_rgb(16, 26, 44);
+    aether_draw_round_rect(x, y, w, h, r, tint,
+                           (unsigned char)(g_theme == 1 ? 0x64 : 0x78));
+
+    /* 触控按压反馈（glass_defaults.dart）：按下整体提亮
+     * 浅色 +0.30 luma / 深色 +0.14 luma，随按压膨胀爬升、松开回落。 */
+    if (pressed) {
+        float lift = g_theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
+        aether_draw_round_rect(x, y, w, h, r, pack_rgb(255, 255, 255),
+                               (unsigned char)(int)(lift * 255.0f));
+    }
+}
+
+/* 浮层内玻璃控件（通知卡片 / 控制中心磁贴 / 抽屉搜索栏 / 最近任务卡片）。
+ * 与 draw_glass_platter 的区别：浮层下层已由 draw_overlay_backdrop 做真算
+ * 模糊，控件不再从 g_veil 复制像素，只叠一层半透明玻璃色调罩，让虚化壁纸
+ * 从控件内透出；全部走绘制原语，天然跟随 aether_render_translate 转场，
+ * 避免直接写 framebuffer 在下拉/上推动画期间与内容错位。
+ * 层级规则仍遵上游：仅 NAV / OVERLAY / MODAL 允许玻璃，内容层落实色。 */
+static void draw_glass_control(int x, int y, int w, int h, int r,
+                               int role, int pressed, unsigned tint, int tint_a)
+{
+    if (w <= 0 || h <= 0) return;
+    if (r > h / 2) r = h / 2;
+    if (r < 0) r = 0;
+    if (!glass_role_allows_glass(role)) {
+        aether_draw_round_rect(x, y, w, h, r, tint, 0xFF);
+        return;
+    }
+    unsigned char elev_a = (unsigned char)((GLASS_SHADOW_ELEV_ARGB >> 24) & 0xFFu);
+    unsigned char cont_a = (unsigned char)((GLASS_SHADOW_CONTACT_ARGB >> 24) & 0xFFu);
+    aether_draw_round_rect(x - GLASS_SHADOW_ELEV_BLUR / 2,
+                           y + GLASS_SHADOW_ELEV_DY,
+                           w + GLASS_SHADOW_ELEV_BLUR, h, r + 2,
+                           pack_rgb(0, 0, 0), elev_a);
+    aether_draw_round_rect(x - GLASS_SHADOW_CONTACT_BLUR / 2,
+                           y + GLASS_SHADOW_CONTACT_DY,
+                           w + GLASS_SHADOW_CONTACT_BLUR, h, r,
+                           pack_rgb(0, 0, 0), cont_a);
+    int spec_a = (int)((g_theme == 1 ? GLASS_SPECULAR_LIGHT
+                                     : GLASS_SPECULAR_DARK) * 255.0f);
+    aether_draw_round_rect(x - 1, y - 1, w + 2, h + 2, r + 1,
+                           pack_rgb(255, 255, 255), (unsigned char)spec_a);
+    /* 半透明玻璃罩：透出下层真算模糊，不盖成实色 */
+    aether_draw_round_rect(x, y, w, h, r, tint, (unsigned char)tint_a);
+    /* 顶部 1px 镜面高光，形成玻璃厚度感 */
+    if (w > 2 * r + 2)
+        aether_fill_rect_alpha(x + r, y, w - 2 * r, 1,
+                               pack_rgb(255, 255, 255),
+                               (unsigned char)(spec_a / 2 + 1));
+    if (pressed) {
+        float lift = g_theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
+        aether_draw_round_rect(x, y, w, h, r, pack_rgb(255, 255, 255),
+                               (unsigned char)(int)(lift * 255.0f));
+    }
+}
+
 /* 桌面小组件：页 0 时钟/日期；其余页真实系统状态（CPU/内存/电量） */
 static void draw_widget(int x, int y, int w, int h)
 {
-    aether_draw_round_rect(x, y, w, h, 20, P_GLASS, 0xD0);
-    aether_draw_border(x, y, w, h, P_BORDER, 1);
+    draw_glass_platter(x, y, w, h, (int)GLASS_RADIUS_LARGE,
+                       GLASS_ROLE_NAV, 0);
     aether_draw_icon(AE_ICON_CLOCK, x + 16, y + 14, 22, P_ACCENT);
     aether_draw_text_utf8(x + 46, y + 16, g_page == 0 ? "时钟" : "系统状态", P_DIM);
     if (g_page == 0) {
@@ -695,8 +902,9 @@ static void draw_home(void)
     draw_page_dots(g_h - NAV_H - DOCK_H - 12);
     /* Dock */
     int dy = g_h - NAV_H - DOCK_H + 4;
-    aether_draw_round_rect(8, dy, g_w - 16, DOCK_H - 8, 26, P_GLASS, 0xD8);
-    aether_draw_border(8, dy, g_w - 16, DOCK_H - 8, P_BORDER, 1);
+    /* 底栏玻璃胶囊底板（总纲 5.11）：磨砂玻璃 + 双层阴影，非纯色块 */
+    draw_glass_platter(8, dy, g_w - 16, DOCK_H - 8, (int)GLASS_RADIUS_LARGE,
+                       GLASS_ROLE_NAV, 0);
     int dcell = (g_w - 32) / DOCK_N;
     int disz = (DOCK_H - 16) * 58 / 100;
     for (int i = 0; i < DOCK_N; i++) {
@@ -897,8 +1105,10 @@ static void draw_overlay_backdrop(void)
 static void draw_notif_center(void)
 {
     int ph = g_h * 60 / 100;
-    /* 背景已由 draw_overlay_backdrop 真算模糊，这里只压一层极淡面板色区分范围 */
-    aether_fill_rect_alpha(0, STATUS_H, g_w, ph, P_PANEL, 96);
+    /* 下层已由 draw_overlay_backdrop 真算模糊：只压极淡遮罩保证可读性，
+     * 让虚化壁纸从卡片玻璃内透出，不盖成实色面板。 */
+    aether_fill_rect_alpha(0, STATUS_H, g_w, ph, P_PANEL,
+                           g_theme == 1 ? 0x28 : 0x58);
     aether_draw_border(0, STATUS_H, g_w, ph, P_BORDER, 1);
     aether_draw_icon(AE_ICON_BELL, 20, STATUS_H + 12, 24, P_TEXT);
     aether_draw_text_utf8(52, STATUS_H + 16, "通知", P_TEXT);
@@ -917,7 +1127,13 @@ static void draw_notif_center(void)
     for (int i = 0; i < 3; i++) {
         if (!g_notif_on[i]) continue;
         shown++;
-        aether_draw_round_rect(14, y, g_w - 28, 78, 16, P_GLASS, 0xE0);
+        int pressed = g_pressed && g_mx >= 14 && g_mx < g_w - 14
+                      && g_my >= y && g_my < y + 78;
+        draw_glass_control(14, y, g_w - 28, 78, (int)GLASS_RADIUS,
+                           GLASS_ROLE_OVERLAY, pressed,
+                           g_theme == 1 ? pack_rgb(236, 242, 252)
+                                        : pack_rgb(22, 32, 52),
+                           g_theme == 1 ? 0x90 : 0xA0);
         aether_draw_border(14, y, g_w - 28, 78, P_BORDER, 1);
         aether_draw_icon(icons[i], 28, y + 16, 26, P_ACCENT);
         aether_draw_text_utf8(66, y + 14, titles[i], P_TEXT);
@@ -989,7 +1205,8 @@ static void cc_geom(int i, int *x, int *y, int *w, int *h)
 static void draw_control_center(void)
 {
     int ph = g_h * 66 / 100;
-    aether_fill_rect_alpha(0, STATUS_H, g_w, ph, P_PANEL, 96);
+    aether_fill_rect_alpha(0, STATUS_H, g_w, ph, P_PANEL,
+                           g_theme == 1 ? 0x28 : 0x58);
     aether_draw_border(0, STATUS_H, g_w, ph, P_BORDER, 1);
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
     char dt[64];
@@ -1000,7 +1217,15 @@ static void draw_control_center(void)
     for (int i = 0; i < 9; i++) {
         int x, y, w, h; cc_geom(i, &x, &y, &w, &h);
         int on = cc_on(i);
-        aether_draw_round_rect(x, y, w, h, 18, on ? P_GLASS_ON : P_GLASS, on ? 0xF0 : 0xD0);
+        int pressed = g_pressed && g_mx >= x && g_mx < x + w
+                      && g_my >= y && g_my < y + h;
+        unsigned ctint = on ? (g_theme == 1 ? pack_rgb(0, 110, 210)
+                                            : pack_rgb(40, 130, 230))
+                            : (g_theme == 1 ? pack_rgb(232, 239, 250)
+                                            : pack_rgb(24, 34, 54));
+        draw_glass_control(x, y, w, h, (int)GLASS_RADIUS_LARGE,
+                           GLASS_ROLE_OVERLAY, pressed, ctint,
+                           on ? 0xC8 : (g_theme == 1 ? 0x88 : 0x98));
         aether_draw_border(x, y, w, h, P_BORDER, 1);
         int is = h * 36 / 100;
         aether_draw_icon(cc_tiles[i].icon, x + 12, y + 10, is,
@@ -1042,13 +1267,20 @@ static void draw_drawer(void)
 {
     /* 背景由 draw_overlay_backdrop 真算模糊；这里只压一层极淡色，
      * 让模糊后的壁纸颜色倾向透出但绝无清晰数字/图标（层级不混淆）。 */
-    aether_fill_rect_alpha(0, STATUS_H, g_w, g_h - STATUS_H - NAV_H, P_PANEL, 84);
-    aether_draw_round_rect(16, STATUS_H + 8, g_w - 32, 44, 22, P_GLASS, 0xE0);
+    aether_fill_rect_alpha(0, STATUS_H, g_w, g_h - STATUS_H - NAV_H, P_PANEL,
+                           g_theme == 1 ? 0x24 : 0x54);
+    int dpressed = g_pressed && g_mx >= 16 && g_mx < g_w - 16
+                   && g_my >= STATUS_H + 8 && g_my < STATUS_H + 52;
+    draw_glass_control(16, STATUS_H + 8, g_w - 32, 44,
+                       (int)GLASS_RADIUS_CAPSULE, GLASS_ROLE_OVERLAY, dpressed,
+                       g_theme == 1 ? pack_rgb(236, 242, 252)
+                                    : pack_rgb(22, 32, 52),
+                       g_theme == 1 ? 0x90 : 0xA0);
     aether_draw_icon(AE_ICON_SEARCH, 30, STATUS_H + 18, 24, P_DIM);
     aether_draw_text_utf8(64, STATUS_H + 22, "全部应用", P_TEXT);
     char cnt[64];
     snprintf(cnt, sizeof cnt, "本机应用 · %d 项", APP_COUNT + g_user_n);
-    aether_draw_text_utf8(20, STATUS_H + 66, cnt, P_DIM);
+    aether_draw_text_utf8(20, STATUS_H + 66, cnt, P_TEXT);
     for (int k = 0; k < APP_COUNT; k++) {
         int x, y, sz; drawer_geom(k, &x, &y, &sz);
         draw_app_tile(k, x, y, sz);
@@ -1060,7 +1292,7 @@ static void draw_drawer(void)
         draw_app_tile(k, x, y, sz);
     }
     char hint[64]; snprintf(hint, sizeof hint, "下滑或点击空白处返回桌面");
-    aether_draw_text_utf8(g_w / 2 - aether_text_width_utf8(hint) / 2, g_h - NAV_H - 34, hint, P_DIM);
+    aether_draw_text_utf8(g_w / 2 - aether_text_width_utf8(hint) / 2, g_h - NAV_H - 34, hint, P_TEXT);
 }
 
 /* 多任务卡片 */
@@ -1073,7 +1305,13 @@ static void draw_recents(void)
     int y = STATUS_H + 44;
     for (int i = 0; i < g_app_n; i++) {
         enum app_kind k = (enum app_kind)g_app_order[i];
-        aether_draw_round_rect(30, y, card_w, card_h, 16, P_GLASS, 0xEC);
+        int rpressed = g_pressed && g_mx >= 30 && g_mx < 30 + card_w
+                       && g_my >= y && g_my < y + card_h;
+        draw_glass_control(30, y, card_w, card_h, (int)GLASS_RADIUS,
+                           GLASS_ROLE_OVERLAY, rpressed,
+                           g_theme == 1 ? pack_rgb(236, 242, 252)
+                                        : pack_rgb(22, 32, 52),
+                           g_theme == 1 ? 0xB0 : 0xB8);
         aether_draw_border(30, y, card_w, card_h, P_BORDER, 1);
         int is = 40;
         aether_draw_round_rect(46, y + (card_h - is) / 2, is, is, 10, aether_app_color(k), 0xFF);
@@ -1117,9 +1355,12 @@ void aether_desktop_render(const char *clock, double cpu, double mem)
         draw_aod();
         return;
     }
-    /* 壁纸（深浅两套完整）：渐变兜底 + 用户设定的真实 PPM 壁纸 */
+    /* 背景层：渐变兜底 + 内置/用户设定的真实 PPM 壁纸 */
     aether_draw_vgradient(0, 0, g_w, g_h, P_BG1, P_BG2);
     draw_wallpaper();
+    /* 磨砂玻璃遮罩层：生成一次「磨砂壁纸盘子」，供导航/控制层玻璃控件采样。
+     * 壁纸/主题/尺寸/换页变化时才重算，逐帧只是复用像素，不阻塞串行 IPC。 */
+    ensure_wall_veil();
 
     /* 解锁动效：桌面图标从中心向外铺开 + 模糊由有到无（5.3），用统一曲线 */
     double unl = aether_anim_value(&g_an_unlock, aether_ease_out);

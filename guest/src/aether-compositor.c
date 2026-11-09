@@ -1,16 +1,18 @@
 /*
- * aether-compositor.c - AetherOS PC 合成器 / 窗口管理器 / 显示服务端
+ * aether-compositor.c - AetherOS 手机合成器 / 显示服务端
  *
  * 职责：
- *   - 通过 DRM 原子接口驱动 virtio-gpu 等显示硬件
- *   - 读取键鼠 / 平板输入（EV_KEY / EV_REL / EV_ABS），更新光标与窗口状态
+ *   - 通过 DRM 原子接口驱动 virtio-gpu 等显示硬件 / fbdev
+ *   - 读取触摸输入（EV_ABS 绝对坐标 + BTN_TOUCH）与键盘，更新触点与窗口状态
+ *     （PC 方案已废弃：不识别鼠标 EV_REL，不绘制任何指针）
  *   - 软件合成桌面（aether-render），双缓冲翻页上屏
  *   - 通过 Unix 域套接字 /run/aetheros-comp.sock 暴露 IPC：
- *       status              -> 帧数/光标/分辨率/窗口状态(JSON)
+ *       status              -> 帧数/触点/分辨率/窗口状态(JSON)
  *       screenshot <path>   -> 把当前上屏帧导出为 PPM
  *       ping                -> pong
  *
- * 与手机基线彻底解耦：x86_64 PC 原生，输入以键鼠为中心。
+ * 本项目只存在手机形态：PC 桌面方案已彻底废弃，输入仅识别触摸（EV_ABS +
+ * BTN_TOUCH）与键盘，不识别鼠标 EV_REL，界面内不绘制任何指针。
  * 已修正前次移植的结构性缺陷（poll 越界 / 跳过 IPC 轮询 / 逐像素写文件）。
  */
 #include "aether-display.h"
@@ -142,8 +144,8 @@ static void clock_str(char *buf, size_t sz)
     snprintf(buf, sz, "%02d:%02d:%02d", tm.tm_hour, tm.tm_min, tm.tm_sec);
 }
 
-/* ---- 输入设备扫描 ---- */
-enum in_kind { IN_KEY = 0, IN_MOUSE = 1, IN_TABLET = 2 };
+/* ---- 输入设备扫描（仅触摸 + 键盘，无鼠标） ---- */
+enum in_kind { IN_KEY = 0, IN_TOUCH = 1 };
 
 struct input_dev {
     int fd;
@@ -171,13 +173,11 @@ static void scan_inputs(void)
         if (fd < 0)
             break;
         int is_abs = has_type(fd, EV_ABS);
-        int is_rel = has_type(fd, EV_REL);
         int is_key = has_type(fd, EV_KEY);
         int kind = -1;
+        /* 触摸屏 / 触控板绝对坐标设备；鼠标 EV_REL 相对位移设备不纳入 */
         if (is_abs)
-            kind = IN_TABLET;
-        else if (is_rel)
-            kind = IN_MOUSE;
+            kind = IN_TOUCH;
         else if (is_key)
             kind = IN_KEY;
         if (kind < 0) {
@@ -197,7 +197,7 @@ static void scan_inputs(void)
         d.kind = kind;
         d.abs_x_max = 1;
         d.abs_y_max = 1;
-        if (kind == IN_TABLET) {
+        if (kind == IN_TOUCH) {
             struct input_absinfo info;
             if (ioctl(fd, EVIOCGABS(ABS_X), &info) == 0 && info.maximum > 0)
                 d.abs_x_max = (int)info.maximum;
@@ -330,9 +330,9 @@ static void handle_client(int cfd)
             uint32_t pw = g_no_display ? (uint32_t)g_cw : g_disp.width;
             uint32_t ph = g_no_display ? (uint32_t)g_ch : g_disp.height;
             snprintf(reply, sizeof reply,
-                     "{\"frame\":%d,\"res\":\"%dx%d\",\"phys\":\"%ux%u\",\"backend\":%d,\"headless\":%d,\"cursor\":[%d,%d],\"desktop\":%s}\n",
+                     "{\"frame\":%d,\"res\":\"%dx%d\",\"phys\":\"%ux%u\",\"backend\":%d,\"headless\":%d,\"touch\":[%d,%d],\"desktop\":%s}\n",
                      g_frame, g_cw, g_ch, pw, ph, g_disp.backend, g_no_display,
-                     aether_render_cursor_x(), aether_render_cursor_y(), js);
+                     aether_render_touch_x(), aether_render_touch_y(), js);
         } else if (strcmp(cmd, "screenshot") == 0) {
             char path[256];
             if (sscanf(buf, "screenshot %255s", path) == 1) {
@@ -497,28 +497,21 @@ int main(void)
                 continue;
             struct input_event ev;
             while (read(fd, &ev, sizeof ev) == (ssize_t)sizeof ev) {
-                int cx = aether_render_cursor_x();
-                int cy = aether_render_cursor_y();
-                if (ev.type == EV_REL && g_in[i].kind == IN_MOUSE) {
-                    if (ev.code == REL_X) cx += ev.value;
-                    else if (ev.code == REL_Y) cy += ev.value;
-                    else continue;
-                    phys_to_canvas(&cx, &cy);
-                    aether_render_set_cursor(cx, cy);
-                    aether_desktop_motion(cx, cy);
-                    dirty = 1;
-                } else if (ev.type == EV_ABS && g_in[i].kind == IN_TABLET) {
+                int cx = aether_render_touch_x();
+                int cy = aether_render_touch_y();
+                if (ev.type == EV_ABS && g_in[i].kind == IN_TOUCH) {
+                    /* 触摸绝对坐标：EV_ABS 分轴上报，累积成完整触点 */
                     if (ev.code == ABS_X) cx = ev.value * (int)g_disp.width / g_in[i].abs_x_max;
                     else if (ev.code == ABS_Y) cy = ev.value * (int)g_disp.height / g_in[i].abs_y_max;
                     else continue;
                     phys_to_canvas(&cx, &cy);
-                    aether_render_set_cursor(cx, cy);
+                    aether_render_set_touch(cx, cy);
                     aether_desktop_motion(cx, cy);
                     dirty = 1;
                 } else if (ev.type == EV_KEY) {
                     if (ev.code == KEY_LEFTSHIFT || ev.code == KEY_RIGHTSHIFT) {
                         g_shift = (ev.value != 0);
-                    } else if (ev.code == BTN_LEFT || ev.code == BTN_TOUCH) {
+                    } else if (ev.code == BTN_TOUCH) {
                         /* 触摸语义：按下(down=1) -> 期间 EV_ABS 位移转发给
                          * aether_desktop_motion 形成拖拽 -> 抬起(down=0) 由外壳
                          * 判定 click 还是 swipe。手机形态不使用幽灵点击。 */

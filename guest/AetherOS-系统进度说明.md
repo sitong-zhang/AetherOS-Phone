@@ -1,5 +1,3 @@
-> **文档状态**：本文件为阶段 5 时的进度快照，其中「发布基线 1.0.11」「待真机验证」「矢量字体未做」等表述均为当时状态，下文不再逐条修订。当前主线为 `1.0.16` / `versionCode 15`：v6 系统盘真机闭环已复跑通过，矢量字体与应用内更新器已落地。最新状态以仓库根 `README.md` 与 `guest/OPENSOURCE-ATTRIBUTION.md` 为准。
-
 # Aether OS 系统构建进度说明（第十章 · 第一步）
 
 **日期**：2026-11-08
@@ -88,7 +86,7 @@
   - `src/aether-phone.c` —— 手机外壳完整桌面重写
   - `src/aether-render.c/.h` —— 新增 `aether_blend_pixel` 单像素 alpha 原语
   - `src/aether-compositor.c` —— 触摸 down/motion/up 拖拽手势转发
-  - `build-pc.sh`、`build-aarch64.sh`、`build-aarch64-min.sh` —— 链接图标模块与 `-lm`
+  - `build-host.sh`、`build-aarch64.sh`、`build-aarch64-min.sh` —— 链接图标模块与 `-lm`
   - `src/aether-font-cjk.h` —— 重生成（844 字）
 - **构建产物**：x86 host 合成器、ARM64 完整版合成器（AArch64 静态 1,190,800 B）、新系统盘 `aetheros-system-v2.qcow2`（8.5 MB）。
 - **分发基线**：本轮**未**覆盖仍在待真机验证的 1.0.11 发布 APK；新系统盘为独立产物，待真机验证后再决定是否合入分发。

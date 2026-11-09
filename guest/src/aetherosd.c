@@ -1,5 +1,5 @@
 /*
- * aetherosd.c - AetherOS PC 系统守护进程
+ * aetherosd.c - AetherOS 系统守护进程
  *
  * 职责：
  *   - 通过 Unix 域套接字 /run/aetheros.sock 暴露 "AetherBus" 契约
@@ -11,7 +11,7 @@
  *   system            -> {"cpu":..,"mem":..,"uptime":..,"svc_up":..,"svc_total":..,"ver":".."}
  *   services          -> 每行 "name<TAB>state"
  *
- * 这是 PC 原生实现，与手机基线无共享代码。
+ * 用户态守护实现，host 与客机共用同一套源码。
  */
 #include "aether-log.h"
 

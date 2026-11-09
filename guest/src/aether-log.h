@@ -1,5 +1,5 @@
 /*
- * aether-log.h - AetherOS PC 共享日志原语
+ * aether-log.h - AetherOS 共享日志原语
  *
  * 设计目标：极简、无依赖、可在 PID1 早期与所有守护中复用。
  * 日志统一写到 fd=2（由 init 在启动早期重定向到串口/内核日志），
