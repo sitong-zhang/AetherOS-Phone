@@ -7,7 +7,9 @@
 #   - /etc/aether/run-compositor    生产版启动脚本（与 v5 基线一致，日志走串口）
 #   - /etc/aether/version           系统版本（1.0.14-stage5）
 #   - /data/aether/*.conf           本机真实数据：离线路线 / 联系人 / 书签
-# v5 已有的 /usr/share/aether/** 壁纸、片源、音频原样保留。
+#   - /usr/share/aether/wallpapers/wall-02.ppm  浅色壁纸（同心波纹对比度增强，
+#     保证浅色主屏「底层清晰壁纸 / 控件区磨砂」分层可见，总纲 6.1 / 6.4）
+# 其余 /usr/share/aether/** 片源、音频、深色壁纸原样保留。
 #
 # 真正的根因（阶段 6 排障结论）：v5 基线盘的 ext4 journal 带 needs_recovery 标志
 # （残留未回放事务）。debugfs -w 绕过 journal 直接改盘，之后 guest 内核挂载时的
@@ -29,10 +31,11 @@ ANDROID_INITD=/root/aether-archive/aether-aarch64-build/stage/etc/aether/init.d/
 PHONETEST="/root/aether-archive/aether-aarch64-build/phonetest-v6.sh"
 STAGE=/root/aether-archive/aether-aarch64-build/stage
 VERSION="$STAGE/etc/aether/version"
+WALL_LIGHT="$STAGE/usr/share/aether/wallpapers/wall-02.ppm"
 DATA="$STAGE/data/aether"
 CMDF="$WORK/debugfs-v6.cmd"
 
-for f in "$BASE" "$COMP" "$ANDROID" "$ANDROID_INITD" "$PHONETEST" "$VERSION" "$STAGE/etc/aether/run-compositor"; do
+for f in "$BASE" "$COMP" "$ANDROID" "$ANDROID_INITD" "$PHONETEST" "$VERSION" "$WALL_LIGHT" "$STAGE/etc/aether/run-compositor"; do
     [ -f "$f" ] || { echo "缺少 $f"; exit 1; }
 done
 [ -d "$DATA" ] || { echo "缺少数据目录 $DATA"; exit 1; }
@@ -73,6 +76,8 @@ echo "[2/6] 生成 debugfs 命令（不重复 mkdir 已存在目录）"
     echo "sif /sbin/aether-android mode 0100755"
     echo "rm /etc/aether/init.d/aether-android"
     echo "write $ANDROID_INITD /etc/aether/init.d/aether-android"
+    echo "rm /usr/share/aether/wallpapers/wall-02.ppm"
+    echo "write $WALL_LIGHT /usr/share/aether/wallpapers/wall-02.ppm"
     for f in route.conf contacts.conf bookmarks.conf; do
         echo "rm /data/aether/$f"
         echo "write $DATA/$f /data/aether/$f"
@@ -117,6 +122,7 @@ verify() {
 verify /sbin/aether-compositor      "$COMP"                            0755
 verify /sbin/aether-android         "$ANDROID"                         0755
 verify /etc/aether/init.d/aether-android "$ANDROID_INITD"               ""
+verify /usr/share/aether/wallpapers/wall-02.ppm "$WALL_LIGHT"          ""
 verify /etc/aether/phonetest.sh     "$PHONETEST"                       0755
 verify /etc/aether/run-compositor   "$STAGE/etc/aether/run-compositor" 0755
 verify /etc/aether/version          "$VERSION"                         ""

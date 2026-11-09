@@ -219,32 +219,40 @@ static void layout(int cw, int ch, int status_h)
 
 void aether_search_render(int ox, int oy, int cw, int ch, int theme, int status_h)
 {
-    (void)theme;
+    /* 深 / 浅两套完整色板（总纲 6.4、禁止清单「深色模式只做一半、应用内不跟随」）。
+     * 搜索是全屏浮层，必须用不透明底，否则下层桌面文字会透出；两套都保持不透明，
+     * 只是底色、卡片、文字、描边、按钮按主题取不同值。 */
+    int light = theme == 1;
     layout(cw, ch, status_h);
-    unsigned bg = pack_rgb(12, 16, 28);
-    unsigned panel = pack_rgb(24, 30, 46);
-    unsigned tx = pack_rgb(236, 242, 252);
-    unsigned dim = pack_rgb(146, 156, 176);
-    unsigned accent = pack_rgb(96, 165, 250);
+    unsigned bg     = light ? pack_rgb(238, 242, 249) : pack_rgb(12, 16, 28);
+    unsigned panel  = light ? pack_rgb(255, 255, 255) : pack_rgb(24, 30, 46);
+    unsigned tx     = light ? pack_rgb(24, 32, 46)   : pack_rgb(236, 242, 252);
+    unsigned dim    = light ? pack_rgb(96, 108, 128)  : pack_rgb(146, 156, 176);
+    unsigned accent = light ? pack_rgb(0, 102, 204)   : pack_rgb(96, 165, 250);
+    unsigned border = light ? pack_rgb(204, 214, 228) : pack_rgb(58, 68, 88);
+    unsigned btn    = light ? pack_rgb(226, 234, 246) : pack_rgb(40, 48, 66);
+    unsigned grad_t = light ? pack_rgb(246, 249, 253) : pack_rgb(18, 26, 44);
+    unsigned grad_b = light ? pack_rgb(220, 230, 243) : pack_rgb(9, 12, 22);
 
     /* 全屏搜索层：不透明底 + 顶部输入框，避免下层桌面文字透出 */
     aether_fill_rect(ox, oy, cw, ch, bg);
-    aether_draw_vgradient(ox, oy, cw, ch, pack_rgb(18, 26, 44),
-                          pack_rgb(9, 12, 22));
+    aether_draw_vgradient(ox, oy, cw, ch, grad_t, grad_b);
 
     for (int i = 0; i < g_row_n; i++) {
         struct row *r = &g_rows[i];
         int X = ox + r->x, Y = oy + r->y;
         if (r->type == 1) {
+            aether_glass_drop_shadow(X, Y, r->w, r->h, 12);
             aether_draw_round_rect(X, Y, r->w, r->h, 12, panel, 0xFF);
-            aether_draw_border(X, Y, r->w, r->h, pack_rgb(58, 68, 88), 1);
+            aether_draw_border(X, Y, r->w, r->h, border, 1);
+            aether_glass_specular_edge(X, Y, r->w, r->h, 12, theme);
             aether_draw_icon(AE_ICON_SEARCH, X + 12, Y + 11, 24, dim);
             char q[160];
             snprintf(q, sizeof q, "%s", g_query[0] ? g_query : "搜索应用、文件、设置与内容");
             unsigned qc = g_query[0] ? tx : dim;
             aether_draw_text_utf8(X + 46, Y + 14, q, qc);
             aether_ui_button(X + r->w - 64, Y + 8, 56, 30, "清除",
-                             pack_rgb(40, 48, 66), tx);
+                             btn, tx);
         } else if (r->type == 2) {
             aether_draw_icon(GROUP_ICON[r->group], X, Y + 3, 20, accent);
             char t[64];
@@ -432,15 +440,20 @@ void aether_neg1_render(int ox, int oy, int cw, int ch, int theme, int status_h,
     const char *kn[4] = { "无线网络", "蓝牙", "手电筒", "勿扰" };
     const int ki[4] = { AE_ICON_WIFI, AE_ICON_BLUETOOTH, AE_ICON_FLASHLIGHT, AE_ICON_MOON };
     int bw = (w - 36 - 3 * 8) / 4;
+    /* 关闭态磁贴：浅色用低亮玻璃灰，深色用深玻璃灰，两套都完整（总纲 6.4） */
+    unsigned off = theme == 1 ? pack_rgb(214, 223, 236) : pack_rgb(48, 56, 74);
+    unsigned off_tx = theme == 1 ? pack_rgb(96, 108, 128) : dim;
     for (int i = 0; i < 4; i++) {
         int bx = x + 18 + i * (bw + 8), by = y + 44;
         int v = aether_sys_get(keys[i]);
+        aether_glass_drop_shadow(bx, by, bw, 52, 12);
         aether_draw_round_rect(bx, by, bw, 52, 12,
-            v ? accent : pack_rgb(48, 56, 74), v ? 0xF0 : 0xD0);
+            v ? accent : off, v ? 0xF0 : 0xD0);
+        aether_glass_specular_edge(bx, by, bw, 52, 12, theme);
         aether_draw_icon(ki[i], bx + bw / 2 - 12, by + 6, 24,
-                         v ? pack_rgb(255, 255, 255) : dim);
+                         v ? pack_rgb(255, 255, 255) : off_tx);
         aether_draw_text_utf8(bx + 6, by + 32, kn[i],
-                              v ? pack_rgb(255, 255, 255) : dim);
+                              v ? pack_rgb(255, 255, 255) : off_tx);
         n1_add(1, keys[i], bx - ox, by - oy, bw, 52);
     }
     y += 116;

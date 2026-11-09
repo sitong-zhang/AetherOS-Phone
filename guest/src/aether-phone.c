@@ -918,7 +918,23 @@ static void draw_home(void)
 /* 锁屏：层级 时间 > 日期 > 通知 > 快捷入口 > 解锁提示 */
 static void draw_lock(const char *clock)
 {
-    aether_draw_vgradient(0, 0, g_w, g_h, pack_rgb(6, 12, 28), pack_rgb(4, 30, 52));
+    /* 锁屏深/浅两套完整可用（总纲 5.4 / 6.4、禁止清单「深色只做一半」）。
+     * 浅色用同一套浅色壁纸铺底 + 极淡暗罩保证大时间可读；深色维持深蓝渐变。
+     * 这里只铺清晰壁纸、不做整屏模糊，避免重演串行 IPC 被渲染饿死。 */
+    int light = g_theme == 1;
+    if (light) {
+        draw_wallpaper();
+        aether_fill_rect_alpha(0, 0, g_w, g_h, pack_rgb(20, 28, 44), 46);
+    } else {
+        aether_draw_vgradient(0, 0, g_w, g_h, pack_rgb(6, 12, 28), pack_rgb(4, 30, 52));
+    }
+    unsigned c_big  = light ? pack_rgb(26, 34, 50)  : pack_rgb(244, 248, 255);
+    unsigned c_date = light ? pack_rgb(64, 78, 100) : pack_rgb(178, 204, 230);
+    unsigned c_msg  = light ? pack_rgb(36, 46, 64)  : pack_rgb(224, 236, 250);
+    unsigned c_icon = light ? pack_rgb(40, 52, 74)  : pack_rgb(210, 226, 245);
+    unsigned c_hint = light ? pack_rgb(70, 84, 108) : pack_rgb(160, 190, 220);
+    unsigned card   = light ? pack_rgb(255, 255, 255) : pack_rgb(255, 255, 255);
+    unsigned quick  = light ? pack_rgb(236, 242, 250) : pack_rgb(255, 255, 255);
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
     char big[16], date[64];
     snprintf(big, sizeof big, "%02d:%02d", tm.tm_hour, tm.tm_min);
@@ -927,25 +943,26 @@ static void draw_lock(const char *clock)
     (void)clock;
     int fs = g_w * 118 / 360; if (fs < 64) fs = 64; if (fs > 140) fs = 140;
     int bw = aether_text_width(big);
-    aether_draw_text_scale(big, g_w / 2 - bw * fs / 32 / 2, g_h * 27 / 100, fs, pack_rgb(244, 248, 255));
+    aether_draw_text_scale(big, g_w / 2 - bw * fs / 32 / 2, g_h * 27 / 100, fs, c_big);
     int dw = aether_text_width_utf8(date);
-    aether_draw_text_utf8(g_w / 2 - dw / 2, g_h * 27 / 100 + fs + 12, date, pack_rgb(178, 204, 230));
+    aether_draw_text_utf8(g_w / 2 - dw / 2, g_h * 27 / 100 + fs + 12, date, c_date);
     /* 通知卡片（与通知中心同一套视觉） */
     int ny = g_h * 27 / 100 + fs + 60;
     const char *msg = "AetherOS：系统已就绪";
-    aether_draw_round_rect(24, ny, g_w - 48, 52, 14, pack_rgb(255, 255, 255), 0x28);
-    aether_draw_icon(AE_ICON_BELL, 36, ny + 14, 24, pack_rgb(210, 226, 245));
-    aether_draw_text_utf8(70, ny + 18, msg, pack_rgb(224, 236, 250));
+    aether_glass_drop_shadow(24, ny, g_w - 48, 52, 14);
+    aether_draw_round_rect(24, ny, g_w - 48, 52, 14, card, light ? 0xC0 : 0x28);
+    aether_draw_icon(AE_ICON_BELL, 36, ny + 14, 24, c_icon);
+    aether_draw_text_utf8(70, ny + 18, msg, c_msg);
     /* 底部快捷入口 */
     int sy = g_h - STATUS_H - 96;
     int ss = 56;
-    aether_draw_round_rect(g_w / 2 - 96, sy, ss, ss, ss / 2, pack_rgb(255, 255, 255), 0x24);
-    aether_draw_icon(AE_ICON_FLASHLIGHT, g_w / 2 - 96 + 16, sy + 16, 24, pack_rgb(230, 240, 252));
-    aether_draw_round_rect(g_w / 2 + 40, sy, ss, ss, ss / 2, pack_rgb(255, 255, 255), 0x24);
-    aether_draw_icon(AE_ICON_CAMERA, g_w / 2 + 40 + 16, sy + 16, 24, pack_rgb(230, 240, 252));
+    aether_draw_round_rect(g_w / 2 - 96, sy, ss, ss, ss / 2, quick, light ? 0xD0 : 0x24);
+    aether_draw_icon(AE_ICON_FLASHLIGHT, g_w / 2 - 96 + 16, sy + 16, 24, c_icon);
+    aether_draw_round_rect(g_w / 2 + 40, sy, ss, ss, ss / 2, quick, light ? 0xD0 : 0x24);
+    aether_draw_icon(AE_ICON_CAMERA, g_w / 2 + 40 + 16, sy + 16, 24, c_icon);
     char hint[64]; snprintf(hint, sizeof hint, "上滑或点击解锁");
     int hw = aether_text_width_utf8(hint);
-    aether_draw_text_utf8(g_w / 2 - hw / 2, sy + ss + 18, hint, pack_rgb(160, 190, 220));
+    aether_draw_text_utf8(g_w / 2 - hw / 2, sy + ss + 18, hint, c_hint);
 }
 
 /* 息屏显示（AOD）：息屏后屏幕不完全黑——中心时间、日期小一号在下面、
@@ -1700,7 +1717,9 @@ void aether_desktop_button(int x, int y, int down)
         if (act == 2) { aether_island_set_form(ISLAND_CARD); return; }
         if (act == 3) { aether_island_set_form(ISLAND_COLLAPSED); return; }
         if (act == 4) { aether_island_swap(); return; }
-        if (act == 6) { return; }
+        /* 卡片按钮真实动作：6 左键播放/暂停，7 右键停止清除（禁止清单「无反馈按钮」） */
+        if (act == 6) { aether_island_action(0); return; }
+        if (act == 7) { aether_island_action(1); return; }
     }
 
     /* 全局搜索：点击结果直达应用 / 设置二级页 */
@@ -1869,6 +1888,12 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
         return;
     }
     if (!strcmp(cmd, "skipboot") || !strcmp(cmd, "unlock")) { unlock(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
+    /* 取证用：干净复位到锁屏（跳过开机动画），供深浅两套锁屏截图 */
+    if (!strcmp(cmd, "relock")) {
+        g_state = PH_LOCKED; g_drawer = 0; g_panel = 0; g_page = 0;
+        aether_island_clear_all();
+        snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
     if (!strcmp(cmd, "home")) { go_home(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
     if (!strcmp(cmd, "back")) { back_in_app(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
     if (!strcmp(cmd, "recents")) { go_recents(); snprintf(reply, sz, "{\"ok\":true}\n"); return; }
@@ -2039,6 +2064,15 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
     }
     if (!strcmp(cmd, "islandswap")) {
         aether_island_swap(); snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
+    /* 卡片态按钮真实动作：0 播放/暂停（状态可观测），1 停止清除 */
+    if (!strcmp(cmd, "islandaction")) {
+        int w = 0; sscanf(line, "%*s %d", &w);
+        int changed = aether_island_action(w);
+        snprintf(reply, sz,
+                 "{\"ok\":true,\"changed\":%d,\"playing\":%d}\n",
+                 changed, aether_island_playing());
+        return;
     }
     if (!strcmp(cmd, "islandclear")) {
         char key[32] = ""; sscanf(line, "%*s %31s", key);

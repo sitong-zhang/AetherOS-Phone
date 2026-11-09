@@ -21,7 +21,8 @@ import wave
 
 HOST = "/usr/share/aether"
 STAGE = "/root/aether-archive/aether-aarch64-build/stage/usr/share/aether"
-VERSION_STAGE = "/root/aether-archive/aether-aarch64-build/stage/etc/aether/version"
+# 版本文件由发布流程（build_apk.sh / make_system_v6.sh）维护，资产生成脚本
+# 不得覆写，否则会把系统盘内版本倒退成历史值（此处曾误写 1.0.12-stage3）。
 
 
 def write_ppm(path, w, h, pixel_fn):
@@ -53,12 +54,18 @@ def wallpaper(style):
             r = 8 + 18 * t + 26 * math.exp(-((u - 0.72) ** 2 + (v - 0.24) ** 2) / 0.10)
             g = 20 + 52 * t + 40 * math.exp(-((u - 0.30) ** 2 + (v - 0.70) ** 2) / 0.14)
             b = 46 + 88 * t
-        elif style == 1:    # 浅雾 · 晨光
-            r = 196 + 46 * t
-            g = 210 + 38 * t
-            b = 232 + 22 * t
-            glow = 16 * math.exp(-((u - 0.5) ** 2 + (v - 0.30) ** 2) / 0.16)
+        elif style == 1:    # 浅雾 · 晨光（浅色主题）
+            # 基色整体压低一档，给同心波纹留足上下明暗余量，避免加亮侧被
+            # clamp 到 255 削顶；仍是浅底，保证深色文字可读（总纲 5.5）。
+            r = 188 + 34 * t
+            g = 202 + 30 * t
+            b = 218 + 22 * t
+            glow = 12 * math.exp(-((u - 0.5) ** 2 + (v - 0.30) ** 2) / 0.16)
             r += glow; g += glow * 0.7
+            # 柔和冷色纵深：与深色壁纸同一套「渐变 + 光晕 + 同心波纹」语言，
+            # 只是换成浅色调，成套风格统一（总纲 6.6）。
+            cool = 14 * math.exp(-((u - 0.28) ** 2 + (v - 0.72) ** 2) / 0.18)
+            g += cool * 0.5; b += cool
         elif style == 2:    # 紫霞
             r = 40 + 66 * t
             g = 22 + 30 * t
@@ -69,9 +76,15 @@ def wallpaper(style):
             r = 10 + 22 * t
             g = 34 + 60 * t
             b = 32 + 44 * t
-        # 极细同心波纹，保证「有细节但不过亮」
+        # 同心圆波纹：深色细密（振幅 5，沉稳），浅色加大振幅与周期对比
+        # （13 + 6 双频），补偿上层磨砂玻璃遮罩的均化，让「底层清晰壁纸 /
+        # 控件区磨砂」这一分层在浅色下同样可见（用户硬要求 2；总纲 6.1）。
+        # 浅色基色已压低留余量，波纹不会削顶，也不会破坏可读性。
         d = math.hypot(u - 0.5, v - 0.42)
-        ripple = 5 * math.sin(d * 46)
+        if style == 1:
+            ripple = 13 * math.sin(d * 30) + 6 * math.sin(d * 62)
+        else:
+            ripple = 5 * math.sin(d * 46)
         return (clamp(r + ripple), clamp(g + ripple), clamp(b + ripple))
     return fn
 
@@ -167,14 +180,6 @@ def main():
         for root in roots:
             write_wav(os.path.join(root, "audio", name), secs, fn)
         total_a += os.path.getsize(os.path.join(HOST, "audio", name))
-
-    # 系统版本文件（设置 → 系统更新 读取）
-    os.makedirs(os.path.dirname(VERSION_STAGE), exist_ok=True)
-    with open(VERSION_STAGE, "w", encoding="utf-8") as f:
-        f.write("Aether OS 手机版 1.0.12-stage3 (AArch64)\n")
-    os.makedirs("/etc/aether", exist_ok=True)
-    with open("/etc/aether/version", "w", encoding="utf-8") as f:
-        f.write("Aether OS 手机版 1.0.12-stage3 (host)\n")
 
     print("壁纸 4 张 360x640 : %d 字节 (单份)" % total_w)
     print("片源 24 帧 320x180: %d 字节 (单份)" % total_c)

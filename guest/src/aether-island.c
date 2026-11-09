@@ -23,10 +23,21 @@ struct island_act {
     char title[64];
     char sub[96];
     int  progress;       /* 0..100，进度类场景 */
-    long start_ms;       /* 起始单调时间：计时器/录音/通话时长 */
+    long start_ms;       /* 起始单调时间：自动收起计时基准 */
     long auto_hide_ms;   /* >0：到点自动收起（充电） */
-    int  playing;        /* 音乐/计时器是否在跑 */
+    int  playing;        /* 音乐/计时器/录音是否在跑（卡片按钮真实切换） */
+    long elapsed_ms;     /* 已累计运行毫秒（暂停时冻结，继续时续算） */
+    long seg_start;      /* 当前运行段的单调起点 */
 };
+
+/* 实时活动已经过的秒数：暂停后冻结，不让数字在暂停期间继续跳 */
+static long act_elapsed(const struct island_act *a, long now)
+{
+    long ms = a->elapsed_ms;
+    if (a->playing) { ms += now - a->seg_start; }
+    if (ms < 0) { ms = 0; }
+    return ms / 1000L;
+}
 
 static struct island_act g_act[IS_COUNT];
 static int g_primary = IS_NONE, g_secondary = IS_NONE;
@@ -148,13 +159,18 @@ void aether_island_set(int scene, const char *title, const char *sub,
 {
     if (scene <= IS_NONE || scene >= IS_COUNT) { return; }
     struct island_act *a = &g_act[scene];
-    if (!a->used) { a->start_ms = now_ms(); }
+    long now = now_ms();
+    if (!a->used) {
+        a->start_ms = now;
+        a->seg_start = now;
+        a->elapsed_ms = 0;
+        a->playing = 1;
+    }
     a->used = 1;
     snprintf(a->title, sizeof a->title, "%s", title ? title : "");
     snprintf(a->sub, sizeof a->sub, "%s", sub ? sub : "");
     if (progress >= 0 && progress <= 100) { a->progress = progress; }
     a->auto_hide_ms = auto_hide_ms;
-    a->playing = 1;
 
     /* SmartIsland IslandPriority.popsUp：短事件在无实时活动时占主位，
      * 有实时活动时退到副位等待。 */
@@ -206,6 +222,37 @@ void aether_island_swap(void)
     g_primary = g_secondary;
     g_secondary = p;
     g_side_from_center = 1;       /* 互换时副圆从中心连续滑出 */
+}
+
+/* 卡片态按钮真实动作。之前 aether_island_hit() 返回 6 后 phone.c 直接
+ * return，按钮点了没有任何状态变化，属于禁止清单「无反馈按钮」。
+ * 现在：左键切换播放/暂停（计时冻结/续算，波形随之静止/流动），
+ * 右键停止并清除该活动（岛收起）。返回 1 表示状态确实改变。 */
+int aether_island_action(int which)
+{
+    int s = g_popup != IS_NONE ? g_popup : g_primary;
+    if (s == IS_NONE) { return 0; }
+    if (which == 1) {
+        aether_island_clear(s);
+        return 1;
+    }
+    struct island_act *a = &g_act[s];
+    long now = now_ms();
+    if (a->playing) {
+        a->elapsed_ms += now - a->seg_start;
+        a->playing = 0;                 /* 暂停：数字冻结 */
+    } else {
+        a->seg_start = now;
+        a->playing = 1;                 /* 继续：从冻结值续算 */
+    }
+    return 1;
+}
+
+int aether_island_playing(void)
+{
+    int s = g_popup != IS_NONE ? g_popup : g_primary;
+    if (s == IS_NONE) { return 0; }
+    return g_act[s].playing;
 }
 
 void aether_island_settle(void)
@@ -292,10 +339,22 @@ static void scene_content(int s, struct island_act *a, int x, int y, int w, int 
     if (s == IS_CHARGE) { ic = pack_rgb(120, 220, 160); }
     aether_draw_icon(scene_icon(s), ix, iy, icon_s, ic);
 
+    /* 录音红点（总纲 5.7「录音：红点 + 时长 + 实时波形」）：呼吸式明暗，
+     * 与隐私指示同色同义（麦克风使用中），不做整屏高亮。 */
+    if (s == IS_RECORD && form != ISLAND_COLLAPSED) {
+        double beat = 0.55 + 0.45 * sin((double)now / 320.0);
+        aether_draw_round_rect(ix + icon_s - 4, iy + icon_s - 4, 10, 10, 5,
+                               pack_rgb(255, 72, 72),
+                               (unsigned char)(150 + 105 * beat));
+    }
+
+    /* 实时时长：暂停时冻结、继续时续算；波形相位同源，暂停即静止。 */
+    long el = act_elapsed(a, now);
+    long run_ms = a->elapsed_ms + (a->playing ? now - a->seg_start : 0);
+
     if (form == ISLAND_COLLAPSED) {
         char t[24];
         if (s == IS_TIMER || s == IS_RECORD || s == IS_CALL) {
-            long el = (now - a->start_ms) / 1000L;
             snprintf(t, sizeof t, "%02ld:%02ld", el / 60, el % 60);
         } else if (s == IS_CHARGE) {
             snprintf(t, sizeof t, "%.23s", a->title[0] ? a->title : "充电中");
@@ -322,7 +381,6 @@ static void scene_content(int s, struct island_act *a, int x, int y, int w, int 
     /* 右侧状态 / 进度数字 */
     char rt[32];
     if (s == IS_TIMER || s == IS_RECORD || s == IS_CALL) {
-        long el = (now - a->start_ms) / 1000L;
         snprintf(rt, sizeof rt, "%02ld:%02ld", el / 60, el % 60);
     } else if (s == IS_CHARGE) {
         snprintf(rt, sizeof rt, "%d%%", a->progress);
@@ -334,10 +392,21 @@ static void scene_content(int s, struct island_act *a, int x, int y, int w, int 
     aether_draw_text_utf8(x + w - 14 - aether_text_width_utf8(rt), y + 14, rt, accent);
 
     int wy = form == ISLAND_CARD ? y + 82 : y + 64;
-    if (s == IS_MUSIC) {
-        draw_wave(tx0, wy, avail, 24, now, accent);
-    } else if (s == IS_RECORD) {
-        draw_wave(tx0, wy, avail, 24, now, pack_rgb(255, 92, 92));
+    if (s == IS_TIMER) {
+        /* 计时器：数字实时跳（总纲 5.7）。大号 mm:ss 居中，随单调时钟每秒变化，
+         * 暂停时冻结；下方保留一条细进度线表示本段运行状态。 */
+        char big[24];
+        snprintf(big, sizeof big, "%02ld:%02ld", el / 60, el % 60);
+        int bh = form == ISLAND_CARD ? 34 : 22;
+        int scale = (bh + 15) / 16;
+        int cw = (int)strlen(big) * 8 * scale;
+        aether_draw_text_scale(big, tx0 + (avail - cw) / 2, wy - 6, bh, tx);
+        aether_ui_bar(tx0, wy + bh - 2, avail, 6,
+                      a->playing ? 100.0 : 0.0, a->playing ? accent : dim);
+    } else if (s == IS_MUSIC || s == IS_RECORD) {
+        /* 波形相位取累计运行毫秒：暂停时不再流动，继续时接着走 */
+        draw_wave(tx0, wy, avail, 24, run_ms,
+                  s == IS_RECORD ? pack_rgb(255, 92, 92) : accent);
     } else if (s == IS_DOWNLOAD || s == IS_UPDATE || s == IS_CHARGE || s == IS_NAV) {
         aether_ui_bar(tx0, wy + 6, avail, 8, (double)a->progress, accent);
     } else {
@@ -345,13 +414,25 @@ static void scene_content(int s, struct island_act *a, int x, int y, int w, int 
     }
 
     if (form == ISLAND_CARD) {
-        /* 卡片态：可点控制按钮，统一控件语言 */
-        const char *b1 = "暂停", *b2 = "停止";
-        if (s == IS_CALL)      { b1 = "保持"; b2 = "挂断"; }
-        if (s == IS_MUSIC)     { b1 = "上一曲"; b2 = "下一曲"; }
-        if (s == IS_NAV)       { b1 = "概览"; b2 = "结束"; }
-        if (s == IS_CHARGE)    { b1 = "电池"; b2 = "关闭"; }
-        if (s == IS_DOWNLOAD)  { b1 = "暂停"; b2 = "取消"; }
+        /* 卡片态：两个按钮都接真实动作（禁止清单「无反馈按钮」）。
+         * 左键切换播放/暂停或收起，右键停止/结束并清除该活动。
+         * 音乐不再只有切曲，改为播放主控 + 停止；文字随 playing 实时变化。 */
+        const char *b1, *b2;
+        if (s == IS_MUSIC) {
+            b1 = a->playing ? "暂停" : "播放"; b2 = "停止";
+        } else if (s == IS_TIMER || s == IS_RECORD) {
+            b1 = a->playing ? "暂停" : "继续"; b2 = "停止";
+        } else if (s == IS_CALL) {
+            b1 = "保持"; b2 = "挂断";
+        } else if (s == IS_NAV) {
+            b1 = "概览"; b2 = "结束";
+        } else if (s == IS_CHARGE) {
+            b1 = "电池"; b2 = "关闭";
+        } else if (s == IS_DOWNLOAD) {
+            b1 = a->playing ? "暂停" : "继续"; b2 = "取消";
+        } else {
+            b1 = a->playing ? "暂停" : "继续"; b2 = "停止";
+        }
         int by = y + h - 46;
         int bw2 = (avail - 12) / 2;
         aether_ui_button(tx0, by, bw2, 34, b1, pack_rgb(38, 46, 62), tx);
@@ -459,8 +540,11 @@ int aether_island_hit(int lx, int ly, int cw, int status_h)
     }
     if (g_form == ISLAND_COLLAPSED) { return 1; }
     if (g_form == ISLAND_EXPANDED) { return 2; }
-    /* 卡片态：下半部按钮区 */
-    if (ly > y + ih - 52) { return 6; }
+    /* 卡片态：下半部按钮区，左/右分别对应播放暂停与停止。
+     * 返回 6/7 交给 phone.c 调 aether_island_action()，按钮不再点了没反应。 */
+    if (ly > y + ih - 52) {
+        return lx < x + iw / 2 ? 6 : 7;
+    }
     return 3;
 }
 
@@ -585,7 +669,10 @@ void aether_island_state(char *buf, size_t sz)
     }
     snprintf(buf, sz,
         "{\"main\":%d,\"main_name\":\"%s\",\"sub\":%d,\"form\":%d,"
-        "\"privacy_count\":%d,\"privacy_panel\":%d,\"morph\":%.2f}",
+        "\"privacy_count\":%d,\"privacy_panel\":%d,\"morph\":%.2f,"
+        "\"playing\":%d,\"elapsed\":%ld}",
         main_s, aether_island_scene_name(main_s), sub_s, g_form,
-        pc, g_priv_panel, g_morph);
+        pc, g_priv_panel, g_morph,
+        main_s == IS_NONE ? 0 : g_act[main_s].playing,
+        main_s == IS_NONE ? 0L : act_elapsed(&g_act[main_s], now_ms()));
 }

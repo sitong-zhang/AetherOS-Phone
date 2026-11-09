@@ -59,6 +59,11 @@ int         aether_island_form(void);
 void        aether_island_settle(void);   /* 取证：把形变直接推到完成态 */
 int         aether_island_live(void);
 const char *aether_island_scene_name(int scene);
+/* 卡片态按钮真实动作：0=左键（播放/暂停 或 收起），1=右键（停止/结束）。
+ * 返回 1 表示状态已改变。总纲 5.7「卡片内按钮点击必须有反馈」，
+ * 禁止清单「无反馈按钮」。 */
+int         aether_island_action(int which);
+int         aether_island_playing(void);
 
 /* 绘制：ox/oy 为画布偏移，cw 为画布宽，status_h 为状态栏高 */
 void        aether_island_render(int ox, int oy, int cw, int ch,
