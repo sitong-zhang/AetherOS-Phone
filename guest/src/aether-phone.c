@@ -22,6 +22,7 @@
 #include "aether-island.h"
 #include "aether-discover.h"
 #include "aether-appdata.h"
+#include "aether-android.h"   /* 安卓兼容层状态查询 */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -339,7 +340,7 @@ int aether_desktop_open(enum app_kind kind)
         if (!dup) g_app_order[g_app_n++] = (int)kind;
     }
     g_drawer = 0; g_panel = 0; g_state = PH_APP;
-    aether_anim_begin(&g_an_app, 300);
+    aether_anim_begin(&g_an_app, GLASS_ANIM_SLOW_MS);   /* 300 <- glass_defaults.dart */
     return w->id;
 }
 void aether_desktop_close(int id)
@@ -1075,12 +1076,29 @@ static void draw_overlay_backdrop(void)
         return;
     }
 
-    aether_glass_panel(0, y0, cw, ch,
-                       28,                       /* 圆角半径（SDF） */
-                       fx >= 2 ? 18 : 9,        /* 模糊半径 */
-                       tint, g_theme == 1 ? 96 : 132,
-                       pack_rgb(255, 255, 255), /* 高光色：白，Plus 混合 */
-                       solid);                  /* minimal 实色 */
+    /* 浮层背景改走「磨砂快路径」，与桌面壁纸盘子同一套上游实现：
+     * downsample -> 可分离高斯 IIR -> 双线性放大，只做真实模糊 + 色调罩。
+     *
+     * 不再调用 aether_glass_panel()/glass_composite(PREMIUM)：后者在
+     * 720x1280 上是 92 万次逐像素 SDF 折射 + 7 段色散 + 法线高光 pow()
+     * + 亮度保持着色，host x86 原生约 85ms，ARM64 TCG 放大约 30 倍后
+     * 会顶穿 watchdog 的 HB_TIMEOUT_MS(2500)，而 screenshot 命令在
+     * handle_client() 里同步渲染、串行 IPC 主循环被独占，ping 得不到
+     * pong 就被误杀（+18.50s 心跳超时 / 服务 code=-1 退出即此因）。
+     *
+     * 仍然遵守总纲 5.x「背景强模糊」与「禁止用静态图片假装毛玻璃」：
+     * 这里是对当前下层画布（含桌面图标）真算高斯，不是贴图；
+     * fx=0（无障碍高对比）退化为实色，零模糊，性能兜底语义不变。 */
+    if (!bits) return;
+    if (fx <= 0) {
+        aether_fill_rect(0, y0, cw, ch, solid);
+    } else {
+        aether_glass_blur_veil(bits, pitch, 0, y0, cw, ch,
+                               fx >= 2 ? 18 : 9);
+        /* 色调罩：亮度保持着色的等价简化，保证浮层文字可读性 */
+        aether_fill_rect_alpha(0, y0, cw, ch, tint,
+                               g_theme == 1 ? 96 : 132);
+    }
 
     /* 保存本次合成结果，供同一会话后续动画帧 / 截图帧复用 */
     if (bits && cw > 0 && ch > 0 && pitch >= cw * 4 && fbh >= y0 + ch) {
@@ -1335,6 +1353,8 @@ void aether_desktop_render(const char *clock, double cpu, double mem)
     aether_island_tick();       /* 连续形变 / 计时 / 自动收起，每帧推进 */
     theme_palette();
     aether_ui_palette();        /* 灵动岛/负一屏/搜索复用同一套控件色板 */
+    /* 全页面按压反馈：把本帧触点注入应用内控件层，所有应用/灵动岛按钮自动命中 */
+    aether_ui_set_touch(g_mx, g_my, g_pressed);
     aether_render_clear_clip();
     aether_render_set_alpha(0xFF);
     aether_render_translate(0, 0);
@@ -1469,7 +1489,7 @@ static void unlock(void) {
     if (g_state == PH_BOOT) g_state = PH_LOCKED;
     if (g_state == PH_LOCKED) {
         g_state = PH_HOME;
-        aether_anim_begin(&g_an_unlock, 380);  /* 图标从中心铺开 */
+        aether_anim_begin(&g_an_unlock, GLASS_SPRING_MS); /* 500 <- glass_spring.dart */
     }
 }
 static void go_home(void)
@@ -1904,6 +1924,16 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
             unlock(); int id = aether_desktop_open((enum app_kind)k);
             snprintf(reply, sz, "{\"ok\":true,\"id\":%d}\n", id);
         } else snprintf(reply, sz, "{\"ok\":false}\n");
+        return;
+    }
+    /* 安卓兼容层：状态查询（真机取证用） */
+    if (!strcmp(cmd, "android")) {
+        int st = aether_android_status_int("state", AANDROID_UNKNOWN);
+        int pk = aether_android_status_int("pkvm", 0);
+        int rf = aether_android_status_int("rootfs", 0);
+        snprintf(reply, sz,
+                 "{\"ok\":true,\"state\":%d,\"name\":\"%s\",\"pkvm\":%d,\"rootfs\":%d}\n",
+                 st, aether_android_state_name(st), pk, rf);
         return;
     }
     if (!strcmp(cmd, "closeall")) {

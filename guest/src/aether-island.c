@@ -7,6 +7,8 @@
  */
 #include "aether-island.h"
 #include "aether-render.h"
+#include "aether-glass.h"       /* 灵动岛浮起感：双层阴影 + 镜面高光（上游规范） */
+#include "aether-glass-spec.h"
 #include "aether-icons.h"
 #include "aether-appdata.h"
 
@@ -415,10 +417,13 @@ void aether_island_render(int ox, int oy, int cw, int ch, int theme, int status_
         g_side_x = 0.0;
     }
 
-    /* 岛主体：真黑胶囊，圆角随高度收敛 */
+    /* 岛主体：真黑胶囊（iOS 灵动岛规范），圆角随高度收敛。
+     * 双层阴影让岛从壁纸上方浮起；顶边镜面高光与全系统控件语言一致。 */
     int radius = ih < 40 ? ih / 2 : 24;
+    aether_glass_drop_shadow(x, y, iw, ih, radius);
     aether_draw_round_rect(x, y, iw, ih, radius, bg, 0xFF);
     aether_draw_border(x, y, iw, ih, pack_rgb(28, 32, 44), 1);
+    aether_glass_specular_edge(x, y, iw, ih, radius, theme);
 
     /* 内容淡入：形变后段才显现，避免中途文字挤压 */
     double fade = clamp01((g_morph - 0.10) / 0.80);

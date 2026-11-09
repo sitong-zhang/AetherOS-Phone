@@ -502,3 +502,50 @@ void aether_glass_blur_tint(int x, int y, int w, int h, int radius,
                     pack_rgb(255, 255, 255), pack_rgb(18, 24, 38),
                     g_quality < GLASS_PREMIUM ? g_quality : GLASS_STANDARD);
 }
+
+/* ==================== 控件级装饰（上游规范照搬） ====================
+ * 应用内页面属「内容层」，按上游 Glass is a Platter / 四层结构规则保持不透明、
+ * 不做折射玻璃；但控件语言（圆角、双层阴影、镜面高光、按压提亮）与浮层完全统一。
+ * 阴影用「外扩的半透明圆角矩形 + 控件本体覆盖内部」实现上游「反向裁剪，
+ * 阴影只落在边界之外」的观感，纯整数 alpha 叠加，TCG 上开销恒定。 */
+
+unsigned aether_glass_lift(unsigned rgb, float k)
+{
+    int r = (int)((rgb >> 16) & 0xFF);
+    int g = (int)((rgb >> 8) & 0xFF);
+    int b = (int)(rgb & 0xFF);
+    /* ambientLight：向白靠拢 k 比例（浅色 +0.30 / 深色 +0.14 luma） */
+    r += (int)((255 - r) * k);
+    g += (int)((255 - g) * k);
+    b += (int)((255 - b) * k);
+    if (r > 255) r = 255; if (g > 255) g = 255; if (b > 255) b = 255;
+    return ((unsigned)r << 16) | ((unsigned)g << 8) | (unsigned)b;
+}
+
+void aether_glass_drop_shadow(int x, int y, int w, int h, int r)
+{
+    if (w <= 0 || h <= 0) return;
+    /* [S] glass_shadow.dart：elevation 约 6% 黑 / blur 8 / dy 2；
+     * contact 约 2% 黑 / blur 2 / dy 1。alpha 从 ARGB 最高字节提取。 */
+    int eb = GLASS_SHADOW_ELEV_BLUR, cb = GLASS_SHADOW_CONTACT_BLUR;
+    unsigned ea = (unsigned char)(GLASS_SHADOW_ELEV_ARGB >> 24);
+    unsigned ca = (unsigned char)(GLASS_SHADOW_CONTACT_ARGB >> 24);
+    /* 先画大范围 elevation，再画贴边 contact；调用方随后画不透明本体覆盖内部 */
+    aether_draw_round_rect(x - eb / 2, y + GLASS_SHADOW_ELEV_DY,
+                           w + eb, h + eb, r + eb / 2, 0x000000u, ea);
+    aether_draw_round_rect(x - cb / 2, y + GLASS_SHADOW_CONTACT_DY,
+                           w + cb, h + cb, r + cb / 2, 0x000000u, ca);
+}
+
+void aether_glass_specular_edge(int x, int y, int w, int h, int r, int theme)
+{
+    if (w <= 0 || h <= 0) return;
+    float a = theme == 1 ? GLASS_SPECULAR_LIGHT : GLASS_SPECULAR_DARK;
+    unsigned char hi = (unsigned char)(a * 255.0f);
+    if (hi < 0x10) hi = 0x10;
+    /* 顶边 1px 镜面高光，避让圆角起始段；底边 1px 暗线强化分层 */
+    aether_fill_rect_alpha(x + r, y, w - 2 * r, 1, 0xFFFFFFu, hi);
+    aether_fill_rect_alpha(x + r, y + h - 1, w - 2 * r, 1, 0x000000u,
+                           (unsigned char)(hi / 2));
+}
+

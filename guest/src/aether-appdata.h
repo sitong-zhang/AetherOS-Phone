@@ -100,6 +100,8 @@ struct app_state *aether_app_state(struct aether_win *win);
 extern unsigned C_BG, C_PANEL, C_TEXT, C_DIM, C_ACCENT, C_BORDER, C_BTN, C_BTN_TX;
 extern unsigned C_OK, C_WARN, C_BAD;
 void aether_ui_palette(void);
+/* 每帧由外壳注入最后触点与按压状态，应用内所有按钮自动获得按压反馈 */
+void aether_ui_set_touch(int x, int y, int down);
 unsigned aether_ui_state_color(char s);
 
 /* ---- 绘图 helper（ui.c 定义） ---- */

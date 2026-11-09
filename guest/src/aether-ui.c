@@ -1,10 +1,23 @@
 /* aether-ui.c - 应用 UI 通用控件与主题调色板 */
 #include "aether-appdata.h"
 #include "aether-render.h"
+#include "aether-glass.h"       /* 统一圆角/双层阴影/镜面高光/按压提亮（上游规范） */
+#include "aether-glass-spec.h"
 #include <stdio.h>
 #include <string.h>
 
 unsigned C_BG, C_PANEL, C_TEXT, C_DIM, C_ACCENT, C_BORDER, C_BTN, C_BTN_TX;
+
+/* 全页面按压反馈：外壳每帧注入，应用内每个按钮自动命中判定，无需逐页改调用点 */
+static int g_ui_tx = -1, g_ui_ty = -1, g_ui_down = 0;
+void aether_ui_set_touch(int x, int y, int down)
+{
+    g_ui_tx = x; g_ui_ty = y; g_ui_down = down ? 1 : 0;
+}
+static int ui_pressed(int x, int y, int w, int h)
+{
+    return g_ui_down && aether_ui_hit(g_ui_tx, g_ui_ty, x, y, w, h);
+}
 unsigned C_OK, C_WARN, C_BAD;
 
 void aether_ui_palette(void)
@@ -73,8 +86,16 @@ void aether_ui_label(int x, int y, const char *s, unsigned c)
 
 void aether_ui_button(int x, int y, int w, int h, const char *s, unsigned bg, unsigned fg)
 {
-    aether_draw_round_rect(x, y, w, h, 6, C_BORDER, 0xFF);
-    aether_draw_round_rect(x + 1, y + 1, w - 2, h - 2, 5, bg, 0xFF);
+    int r = (int)GLASS_RADIUS_SMALL;            /* 8 <- glass_defaults.dart */
+    int pressed = ui_pressed(x, y, w, h);
+    int theme = aether_desktop_theme();
+    aether_glass_drop_shadow(x, y, w, h, r);    /* 双层阴影，先于本体 */
+    /* 内容层保持不透明（上游 Glass is a Platter）；按压按 ambientLight 提亮 */
+    float lift = theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
+    unsigned face = pressed ? aether_glass_lift(bg, lift) : bg;
+    aether_draw_round_rect(x, y, w, h, r, C_BORDER, 0xFF);
+    aether_draw_round_rect(x + 1, y + 1, w - 2, h - 2, r - 1, face, 0xFF);
+    aether_glass_specular_edge(x, y, w, h, r, theme);
     char t[64];
     aether_ui_fit(t, sizeof t, s, w - 8);
     int tw = aether_text_width_utf8(t);
@@ -85,15 +106,22 @@ void aether_ui_bar(int x, int y, int w, int h, double pct, unsigned c)
 {
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
-    aether_draw_round_rect(x, y, w, h, 4, C_BORDER, 0xFF);
+    int r = (int)GLASS_RADIUS_SMALL;
+    aether_glass_drop_shadow(x, y, w, h, r);
+    aether_draw_round_rect(x, y, w, h, r, C_BORDER, 0xFF);
+    aether_draw_round_rect(x + 1, y + 1, w - 2, h - 2, r - 1, C_BTN, 0xFF);
     int fw = (int)(w * pct / 100.0);
-    if (fw > 2) aether_draw_round_rect(x + 1, y + 1, fw - 2, h - 2, 3, c, 0xFF);
+    if (fw > 2) aether_draw_round_rect(x + 1, y + 1, fw - 2, h - 2, r - 1, c, 0xFF);
+    aether_glass_specular_edge(x, y, w, h, r, aether_desktop_theme());
 }
 
 void aether_ui_status(int ox, int oy, int cw, int ch, struct app_state *st)
 {
     aether_fill_rect(ox, oy + ch - 24, cw, 24, C_PANEL);
     aether_fill_rect(ox, oy + ch - 24, cw, 1, C_BORDER);
+    /* 顶边镜面高光：状态栏与浮层共用一套控件语言 */
+    aether_fill_rect_alpha(ox, oy + ch - 24, cw, 1, 0xFFFFFFu,
+                           (unsigned char)(GLASS_SPECULAR_LIGHT * 255.0f));
     char b[128];
     aether_ui_fit(b, sizeof b, st->status[0] ? st->status : "就绪", cw - 16);
     aether_ui_label(ox + 8, oy + ch - 20, b, C_DIM);

@@ -50,6 +50,8 @@ fi
 echo "[build-aarch64] aether-compositor (+display +render +icons +$SHELL_SRC +ui +apps) [NO_DRM/fbdev]"
 $CC $FLAGS -o "$OUT/sbin/aether-compositor" \
     "$SRC/aether-compositor.c" "$SRC/aether-display.c" \
+    "$SRC/aether-android-bridge.c" \
+    "$SRC/aether-android-util.c" \
     "$SRC/aether-render.c" "$SRC/aether-anim.c" "$SRC/aether-glass.c" "$SRC/aether-icons.c" "$SRC/$SHELL_SRC" "$SRC/aether-ui.c" \
     "$SRC/aether-apps.c" "$SRC/aether-apps2.c" "$SRC/aether-settings.c" \
     "$SRC/aether-island.c" "$SRC/aether-discover.c" "$SRC/aether-store.c" "$SRC/aether-notes.c" "$SRC/aether-log.c" \
@@ -57,6 +59,9 @@ $CC $FLAGS -o "$OUT/sbin/aether-compositor" \
 
 echo "[build-aarch64] aether-watchdog"
 $CC $FLAGS -o "$OUT/sbin/aether-watchdog" "$SRC/aether-watchdog.c" "$SRC/aether-log.c"
+# 安卓兼容层服务：独立二进制，由 init.d 声明拉起；缺依赖时如实降级
+$CC $FLAGS -o "$OUT/sbin/aether-android" "$SRC/aether-android.c" "$SRC/aether-android-util.c" "$SRC/aether-log.c"
+
 
 echo "[build-aarch64] aether-sysinfo / aether-hello / aether-shot / aether-ipc"
 $CC $FLAGS -o "$OUT/bin/aether-sysinfo" "$SRC/aether-sysinfo.c"

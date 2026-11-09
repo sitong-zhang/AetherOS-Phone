@@ -177,13 +177,14 @@ P75 降级阈值 `20 / 28 ms`，以及 `glass_role_allows_glass()` / `glass_role
 避免全屏 720×1280 逐像素 SDF / 色散合成在 ARM64 TCG 上阻塞串行 IPC 主循环而触发看门狗误杀。
 
 **验证**：host 与 ARM64 全量编译通过；系统盘注入后经 `vm/host/run_v6.sh` 跑 QEMU TCG 全系统闭环，
-`CHAIN=0`、`SELFTEST_STAGE5_DONE=1`、`SELFTEST_DONE=1`、39 帧、看门狗无误杀；
-真机桌面帧可见真实壁纸与磨砂玻璃控件，界面内无鼠标指针，文字无底部裁切。
+`CHAIN=0`、`SELFTEST_STAGE5_DONE=1`、`SELFTEST_DONE=1`、40 帧、看门狗零命中、
+合成器仅启动一次；真机桌面帧可见真实壁纸与磨砂玻璃控件，界面内无鼠标指针，文字无底部裁切。
 
 ### 浮层页面控件
 
 通知中心卡片、控制中心磁贴、抽屉搜索栏与最近任务卡片此前仍是实色圆角块，未接入玻璃规范。
-本轮新增 `draw_glass_control()`：浮层下层已由 `draw_overlay_backdrop()` 做真算模糊，
+本轮新增 `draw_glass_control()`：浮层下层已由 `draw_overlay_backdrop()` 做真算模糊
+（现统一走 `aether_glass_blur_veil()` 磨砂快路径，见下文「浮层背景性能边界」），
 控件本身只叠一层半透明玻璃色调罩，让虚化壁纸从控件内透出，并接入上游圆角
 （`GLASS_RADIUS` / `GLASS_RADIUS_LARGE` / `GLASS_RADIUS_CAPSULE`）、镜面亮边、
 双层阴影与 `GLASS_AMBIENT_LIGHT_*` 触控按压反馈；开 / 关状态用不同色调罩区分。
@@ -198,3 +199,59 @@ P75 降级阈值 `20 / 28 ms`，以及 `glass_role_allows_glass()` / `glass_role
 
 Apache-2.0 项目保留版权与许可声明并标注重实现关系（`SOURCE.md`、`MAPPING.md`、`aether-glass.h` 头部）；
 MIT 项目三份许可证全文随仓库分发；`upstream/` 副本保持原样，未作修改，避免污染上游署名。
+
+## 浮层背景性能边界
+
+`draw_overlay_backdrop()` 原先用 `aether_glass_panel()` 走完整 `glass_composite()`：
+720×1280 逐像素 SDF 折射 + 7 段色散 + 法线高光 `pow()` + 亮度保持着色，
+约 92 万次重浮点运算。该调用位于 `screenshot` 命令的 `handle_client()` 同步路径内，
+而合成器的 IPC 是串行单线程 accept；一旦 ARM64 TCG 上单次合成超过看门狗的
+`HB_TIMEOUT_MS`（2500 ms），心跳 `ping` 得不到 `pong`，合成器会被判为失活并重启。
+
+集成安卓兼容层与全页面控件装饰后逐帧绘制量增加，该阈值被顶穿，真机闭环出现一次
+看门狗心跳超时与合成器重启（帧数由 39 降至 33）。修复方式与「桌面壁纸盘子」一致：
+浮层背景改走 `aether_glass_blur_veil()` 快路径（降采样 → 可分离高斯 → 双线性放大）
+并叠主题色调罩，缓存键与复用逻辑保持不变；`fx=0`（无障碍高对比）仍退化为实色。
+快路径是真算高斯模糊，不是静态贴图，符合总纲「背景强模糊」与「禁止用静态图片
+假装毛玻璃」。
+
+**验证**：修复后 QEMU TCG 全系统闭环显示打开 1 次、看门狗零命中、无合成器重启、
+40 帧、`SELFTEST_DONE=1`；抽屉与控制中心帧目视确认背景虚化和玻璃控件完整。
+
+## 安卓兼容层上游
+
+安卓兼容层按「开源优先、先搜后用、直接照搬成熟实现」落地。上游源码与许可证原样
+保存在 `guest/third_party/android-compat/`，逐条符号映射见 `MAPPING.md`，
+完整性校验见 `SHA256SUMS`，来源说明见 `SOURCE.md`。
+
+| 上游 | 许可 | 纳入内容 | 对应实现 |
+| --- | --- | --- | --- |
+| [Waydroid](https://github.com/waydroid/waydroid) `tools/helpers/lxc.py` / `drivers.py` | GPL-3.0 | LXC 挂载序列、binderfs / binder 节点、`lxc-start -- /init`、`ANDROID_ENV` | `guest/src/aether-android.c` 的 `unshare` + `mount` + `chroot` + `execve("/init")` |
+| [AOSP Virtualization](https://android.googlesource.com/platform/packages/modules/Virtualization) README | Apache-2.0 | AVF 能力检测、pKVM 属性、`MANAGE_VIRTUAL_MACHINE` 与 API 34 限制（带来源标注的摘录） | `vm/android/java/dev/aether/vm/AvfCapability.java` / `AvfLauncher.java` / `AvfPayload.java` |
+| Linux 内核 UAPI `linux/uinput.h` / `input-event-codes.h` | GPL-2.0 WITH Linux-syscall-note | uinput ioctl 与 `EV_ABS` / `BTN_TOUCH` / `SYN_REPORT` 常量 | `guest/src/aether-android-bridge.c` 输入桥 |
+| Waydroid `platform_hardware_wayland` hwcomposer 共享内存回退路径 | — | 生产者写帧 / 消费者贴图的 buffer 交换模型 | `guest/src/aether-android.h` 64B 帧头 + `guest/src/aether-android-bridge.c` 图形桥 |
+
+### 诚实边界
+
+`VirtualMachineManager` / `VirtualMachineConfig` 是 API 34 起可用的 `@SystemApi`，
+需要 `MANAGE_VIRTUAL_MACHINE` 受限权限；AVF 面向 headless / Microdroid 隔离负载，
+不提供图形 HAL，无法承载带桌面的完整客机。普通第三方 APK 因此不能走 AVF 图形路径，
+`AvfLauncher.decide()` 的默认且实际生效路径恒为 QEMU TCG，AVF 分支为能力门控的
+反射入口，缺少 Microdroid payload 时自动降级。客机 `aether-android` 服务在
+pKVM 不可用或未安装 LineageOS arm64 rootfs 时写入 `unavailable` 状态与降级提示，
+应用商店「安卓应用」分类灰显安装入口，AetherOS 本体照常使用。当前内部调试构建的
+安卓运行时镜像未随包分发，**不宣称已可在桌面运行百万安卓 APK**。
+
+### 协议与验证
+
+共享帧协议：`/run/aether/android.fb`，64B 头（`magic="AAFB"` / `version=1` / `seq` /
+`width/height/stride/format/flags` / 窗口几何），总长 `64 + 720×4×1280`；
+`flags & AANDROID_FB_FLAG_VISIBLE` 控制浮窗可见性，容器未运行时恒为 0，零副作用。
+输入桥用 `UI_SET_EVBIT` / `UI_SET_ABSBIT` / `UI_DEV_CREATE` 创建
+`aether-android-touch` 虚拟触摸设备，仅在触点落入浮窗区域时注入。
+
+`guest/tools/test_android_compat.c` 覆盖状态枚举、64B 帧头、协议常量、降级提示、
+控制通道路径、内核参数读取与 Linux UAPI 事件常量，结果 `35 PASS / 0 FAIL`。
+真机闭环串口证据：`SELFTEST_ANDROID_STATUS` 为 `state=1 unavailable`、
+`SELFTEST_ANDROID_FILE` 含 `reason=pkvm-unavailable` 与降级提示、
+`SELFTEST_ANDROID_COMPAT_DONE=1`。

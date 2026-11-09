@@ -4,6 +4,14 @@
 void aether_render_framebuffer(unsigned char **b,int *w,int *h,int *p){
     if(b)*b=0; if(w)*w=0; if(h)*h=0; if(p)*p=0;
 }
+/* 控件级装饰（drop_shadow / specular_edge）用到的 render 原语：
+ * 单元测试只验证玻璃数学，绘制原语用空 stub 满足链接即可。 */
+void aether_draw_round_rect(int x,int y,int w,int h,int r,unsigned rgb,unsigned char a){
+    (void)x;(void)y;(void)w;(void)h;(void)r;(void)rgb;(void)a;
+}
+void aether_fill_rect_alpha(int x,int y,int w,int h,unsigned rgb,unsigned char a){
+    (void)x;(void)y;(void)w;(void)h;(void)rgb;(void)a;
+}
 static int pass=0, fail=0;
 #define CK(c,m) do{ if(c){printf("  [OK] %s\n",m);pass++;}else{printf("  [FAIL] %s\n",m);fail++;} }while(0)
 static float luma(float r,float g,float b){ return GLASS_LUMA_R*r+GLASS_LUMA_G*g+GLASS_LUMA_B*b; }

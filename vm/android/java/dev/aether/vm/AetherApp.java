@@ -115,7 +115,23 @@ public class AetherApp extends Application {
         String conf = sb.toString()
                 .replace("@KERNEL@", new File(vmDir, "kernel.img").getAbsolutePath())
                 .replace("@DISK@",   new File(vmDir, "system.qcow2").getAbsolutePath())
-                .replace("@RUN@",    vmDir.getAbsolutePath());
+                .replace("@RUN@",    vmDir.getAbsolutePath())
+                .replace("@AVF_ARGS@", AvfCapability.kernelArgs(this));
+
+        // 启动路径决策（只读探测，不改变现有 QEMU TCG 启动链），结果写入诊断文件，
+        // 供诊断浮层与崩溃报告展示；客机侧通过内核命令行 aether.avf.* 读取。
+        AvfLauncher.Decision d = AvfLauncher.decide(this, false);
+        try (FileOutputStream out = new FileOutputStream(new File(vmDir, "hypervisor.conf"))) {
+            String report = "mode=" + d.label() + "\n"
+                    + "capability=" + d.capability + "\n"
+                    + "reason=" + d.reason + "\n"
+                    + "args=" + AvfCapability.kernelArgs(this) + "\n";
+            out.write(report.getBytes(StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            Log.w(TAG, "hypervisor.conf 写入失败（不影响启动）", e);
+        }
+        Log.i(TAG, "虚拟机启动路径: " + d.label() + " — " + d.reason);
+
         try (FileOutputStream out = new FileOutputStream(new File(vmDir, "vm.conf.final"))) {
             out.write(conf.getBytes(StandardCharsets.UTF_8));
         }

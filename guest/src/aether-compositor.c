@@ -17,6 +17,7 @@
  */
 #include "aether-display.h"
 #include "aether-render.h"
+#include "aether-android.h"   /* 安卓兼容层：图形桥/输入桥 */
 #include "aether-log.h"
 #include "aether-desktop.h"
 #include "aether-anim.h"
@@ -327,12 +328,15 @@ static void handle_client(int cfd)
         } else if (strcmp(cmd, "status") == 0) {
             char js[2048];
             aether_desktop_state(js, sizeof js);
+            int a_state = aether_android_status_int("state", AANDROID_UNKNOWN);
+            int a_pkvm  = aether_android_status_int("pkvm", 0);
             uint32_t pw = g_no_display ? (uint32_t)g_cw : g_disp.width;
             uint32_t ph = g_no_display ? (uint32_t)g_ch : g_disp.height;
             snprintf(reply, sizeof reply,
-                     "{\"frame\":%d,\"res\":\"%dx%d\",\"phys\":\"%ux%u\",\"backend\":%d,\"headless\":%d,\"touch\":[%d,%d],\"desktop\":%s}\n",
+                     "{\"frame\":%d,\"res\":\"%dx%d\",\"phys\":\"%ux%u\",\"backend\":%d,\"headless\":%d,\"touch\":[%d,%d],\"android\":{\"state\":%d,\"pkvm\":%d},\"desktop\":%s}\n",
                      g_frame, g_cw, g_ch, pw, ph, g_disp.backend, g_no_display,
-                     aether_render_touch_x(), aether_render_touch_y(), js);
+                     aether_render_touch_x(), aether_render_touch_y(),
+                     a_state, a_pkvm, js);
         } else if (strcmp(cmd, "screenshot") == 0) {
             char path[256];
             if (sscanf(buf, "screenshot %255s", path) == 1) {
@@ -401,6 +405,8 @@ int main(void)
 
     aether_render_init(g_canvas, g_cw, g_ch, g_cw * 4);
     aether_desktop_init(g_cw, g_ch);
+    /* 安卓兼容层桥：无容器时零副作用（共享帧不可见、uinput 缺失静默降级） */
+    aether_android_bridge_init();
 
     scan_inputs();
 
@@ -506,7 +512,9 @@ int main(void)
                     else continue;
                     phys_to_canvas(&cx, &cy);
                     aether_render_set_touch(cx, cy);
-                    aether_desktop_motion(cx, cy);
+                    /* 输入桥：触点落在安卓窗口内则喂给容器，桌面不重复处理 */
+                    if (!aether_android_bridge_input(cx, cy, 0))
+                        aether_desktop_motion(cx, cy);
                     dirty = 1;
                 } else if (ev.type == EV_KEY) {
                     if (ev.code == KEY_LEFTSHIFT || ev.code == KEY_RIGHTSHIFT) {
@@ -517,10 +525,12 @@ int main(void)
                          * 判定 click 还是 swipe。手机形态不使用幽灵点击。 */
                         if (ev.value == 1) {
                             phys_to_canvas(&cx, &cy);
-                            aether_desktop_button(cx, cy, 1);
+                            if (!aether_android_bridge_input(cx, cy, 1))
+                                aether_desktop_button(cx, cy, 1);
                         } else if (ev.value == 0) {
                             phys_to_canvas(&cx, &cy);
-                            aether_desktop_button(cx, cy, 0);
+                            if (!aether_android_bridge_input(cx, cy, 0))
+                                aether_desktop_button(cx, cy, 0);
                         }
                         dirty = 1;
                     } else if (ev.value == 1 || ev.value == 2) {
@@ -551,6 +561,8 @@ int main(void)
             char clk[16];
             clock_str(clk, sizeof clk);
             aether_desktop_render(clk, g_cpu, g_mem);
+            /* 安卓 App 以窗口形式浮在桌面，不抢全屏；容器未运行时不绘制 */
+            aether_android_bridge_render();
             g_last_frame = g_canvas;
             if (!g_no_display) {
                 present_canvas();

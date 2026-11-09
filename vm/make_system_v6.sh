@@ -24,13 +24,15 @@ OUT="$WORK/aetheros-system-v6.qcow2"
 CANON=/root/aether-archive/aether-aarch64-build/aetheros-system-v6.qcow2
 RAW="$WORK/v6.raw"
 COMP=/root/aether-archive/aether-aarch64-build/root-full/sbin/aether-compositor
+ANDROID=/root/aether-archive/aether-aarch64-build/root-full/sbin/aether-android
+ANDROID_INITD=/root/aether-archive/aether-aarch64-build/stage/etc/aether/init.d/aether-android
 PHONETEST="/root/aether-archive/aether-aarch64-build/phonetest-v6.sh"
 STAGE=/root/aether-archive/aether-aarch64-build/stage
 VERSION="$STAGE/etc/aether/version"
 DATA="$STAGE/data/aether"
 CMDF="$WORK/debugfs-v6.cmd"
 
-for f in "$BASE" "$COMP" "$PHONETEST" "$VERSION" "$STAGE/etc/aether/run-compositor"; do
+for f in "$BASE" "$COMP" "$ANDROID" "$ANDROID_INITD" "$PHONETEST" "$VERSION" "$STAGE/etc/aether/run-compositor"; do
     [ -f "$f" ] || { echo "缺少 $f"; exit 1; }
 done
 [ -d "$DATA" ] || { echo "缺少数据目录 $DATA"; exit 1; }
@@ -66,6 +68,11 @@ echo "[2/6] 生成 debugfs 命令（不重复 mkdir 已存在目录）"
     echo "rm /etc/aether/run-compositor"
     echo "write $STAGE/etc/aether/run-compositor /etc/aether/run-compositor"
     echo "sif /etc/aether/run-compositor mode 0100755"
+    echo "rm /sbin/aether-android"
+    echo "write $ANDROID /sbin/aether-android"
+    echo "sif /sbin/aether-android mode 0100755"
+    echo "rm /etc/aether/init.d/aether-android"
+    echo "write $ANDROID_INITD /etc/aether/init.d/aether-android"
     for f in route.conf contacts.conf bookmarks.conf; do
         echo "rm /data/aether/$f"
         echo "write $DATA/$f /data/aether/$f"
@@ -108,6 +115,8 @@ verify() {
     echo "  ok $path  ${a:0:16}…  $(stat -c %s "$src") B  ${want_mode:-[不改权限]}"
 }
 verify /sbin/aether-compositor      "$COMP"                            0755
+verify /sbin/aether-android         "$ANDROID"                         0755
+verify /etc/aether/init.d/aether-android "$ANDROID_INITD"               ""
 verify /etc/aether/phonetest.sh     "$PHONETEST"                       0755
 verify /etc/aether/run-compositor   "$STAGE/etc/aether/run-compositor" 0755
 verify /etc/aether/version          "$VERSION"                         ""

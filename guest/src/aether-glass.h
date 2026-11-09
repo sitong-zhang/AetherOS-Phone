@@ -128,4 +128,12 @@ void aether_glass_blur_tint(int x, int y, int w, int h, int radius,
 void aether_glass_blur_veil(unsigned char *dst, int dst_pitch,
                             int x, int y, int w, int h, int radius);
 
+/* ---- 控件级装饰（内容层不折射，但补齐统一的圆角/阴影/镜面高光/按压） ----
+ * 上游依据：[S] glass_shadow.dart 双层阴影、glass_defaults.dart
+ * specularLightAlpha/specularDarkAlpha 与 ambientLight 提亮。
+ * 应用内页面、灵动岛、浮层共用，保证「全系统一套控件语言」（总纲 6.2）。 */
+void     aether_glass_drop_shadow(int x, int y, int w, int h, int r);
+void     aether_glass_specular_edge(int x, int y, int w, int h, int r, int theme);
+unsigned aether_glass_lift(unsigned rgb, float k);
+
 #endif /* AETHER_GLASS_H */

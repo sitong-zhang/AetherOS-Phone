@@ -14,6 +14,8 @@
 #include "aether-render.h"
 #include "aether-icons.h"
 #include "aether-appicons.h"
+#include "aether-android.h"   /* 安卓兼容层状态与降级提示 */
+#include "aether-glass-spec.h" /* 上游圆角 GLASS_RADIUS / GLASS_RADIUS_SMALL */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -99,6 +101,13 @@ static void store_home(struct aether_win *w, int ox, int oy, int cw, int ch, str
     aether_ui_label(ox + 54, oy + 18, st->store_qlen ? st->store_query : "搜索应用、游戏与内容", C_DIM);
 
     int y = oy + 60;
+    /* 分类入口：本机应用 / 安卓应用（用户路线第 5 点） */
+    int tabw = (cw - 36) / 2, tabh = 34, taby = y;
+    aether_draw_round_rect(ox + 12, taby, tabw, tabh, 12, C_ACCENT, 0xFF);
+    aether_ui_label(ox + 12 + tabw / 2 - 32, taby + 9, "本机应用", 0xFFFFFFFFu);
+    aether_draw_round_rect(ox + 24 + tabw, taby, tabw, tabh, 12, C_BTN, 0xFF);
+    aether_ui_label(ox + 24 + tabw + tabw / 2 - 32, taby + 9, "安卓应用", C_BTN_TX);
+    y += tabh + 12;
     /* 推荐位：横向滚动（最多 3 张） */
     aether_ui_label(ox + 14, y, "为你推荐", C_TEXT);
     y += 22;
@@ -153,6 +162,69 @@ static void store_home(struct aether_win *w, int ox, int oy, int cw, int ch, str
             aether_ui_label(bx + 12, by + 8, a->kind == APP_NOTES ? "卸载" : "管理", C_BTN_TX);
         }
     }
+}
+
+/* ================= 安卓应用分类（兼容层状态 / 降级提示）=================
+ * 用户路线第 5/6 点：商店里加「安卓应用」分类，调容器里的 pm install / am start；
+ * pKVM 不可用时明确提示「需要更高版本系统」，AetherOS 本体照常用。
+ * 状态来自 aether-android 服务真实写入的 /run/aether/android.status，
+ * 不臆造已安装应用数量，不假称「百万 APK 可打开」。 */
+static void store_android(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
+{
+    (void)st;
+    int y = app_top_bar(w, ox, oy, cw, ch, "安卓应用");
+    y += 16;
+
+    int state = aether_android_status_int("state", AANDROID_UNKNOWN);
+    int pkvm  = aether_android_status_int("pkvm", 0);
+    int rootfs = aether_android_status_int("rootfs", 0);
+    int running = (state == AANDROID_RUNNING);
+
+    /* 状态玻璃卡片 */
+    int cx = ox + 12, cwid = cw - 24, chh = 132;
+    aether_draw_round_rect(cx, y, cwid, chh, (int)GLASS_RADIUS, C_PANEL, 0xF0);
+    aether_draw_border(cx, y, cwid, chh, C_BORDER, 1);
+    const char *badge = running ? "已就绪" : (pkvm ? "缺少运行时镜像" : "需要更高版本系统");
+    unsigned bcol = running ? C_OK : C_WARN;
+    aether_draw_round_rect(cx + 14, y + 14, 8, 8, 4, bcol, 0xFF);
+    aether_ui_label(cx + 30, y + 8, badge, C_TEXT);
+    char line1[128];
+    snprintf(line1, sizeof line1, "兼容层状态：%s", aether_android_state_name(state));
+    aether_ui_label(cx + 14, y + 34, line1, C_DIM);
+    char line2[128];
+    snprintf(line2, sizeof line2, "pKVM/AVF：%s   安卓运行时：%s",
+             pkvm ? "可用" : "不可用", rootfs ? "已安装" : "未安装");
+    aether_ui_label(cx + 14, y + 56, line2, C_DIM);
+    /* 降级提示（用户路线第 6 点） */
+    const char *hint = pkvm ? AANDROID_HINT_ROOTFS : AANDROID_HINT_PKVM;
+    aether_ui_fit(line1, sizeof line1, hint, cwid - 28);
+    aether_ui_label(cx + 14, y + 82, line1, C_TEXT);
+    aether_ui_fit(line1, sizeof line1, "AetherOS 本体功能不受影响，可正常使用", cwid - 28);
+    aether_ui_label(cx + 14, y + 104, line1, C_DIM);
+    y += chh + 20;
+
+    /* 分类说明 */
+    aether_ui_label(ox + 14, y, "关于安卓应用", C_TEXT);
+    y += 26;
+    const char *desc1 = "在 AetherOS 桌面里以窗口形式运行安卓应用；";
+    const char *desc2 = "应用通过容器内的 pm install 安装、am start 拉起。";
+    aether_ui_fit(line1, sizeof line1, desc1, cwid - 16);
+    aether_ui_label(ox + 14, y, line1, C_DIM); y += 22;
+    aether_ui_fit(line1, sizeof line1, desc2, cwid - 16);
+    aether_ui_label(ox + 14, y, line1, C_DIM); y += 30;
+
+    /* 安装入口：不可用则灰显并写明原因 */
+    int bw = cwid, bh = 46, bx = ox + 12, by = y;
+    aether_draw_round_rect(bx, by, bw, bh, (int)GLASS_RADIUS_SMALL,
+                           running ? C_ACCENT : C_BTN, 0xFF);
+    aether_ui_label(bx + bw / 2 - 48, by + 14,
+                    running ? "安装安卓应用 (APK)" : "暂不可用 · 需要更高版本系统",
+                    running ? 0xFFFFFFFFu : C_BTN_TX);
+    y += bh + 16;
+    aether_ui_fit(line1, sizeof line1,
+                  "外层 AVF/pKVM + 内层 LXC/AOSP 容器；当前为内部调试构建，运行时镜像未随包分发。",
+                  cwid - 16);
+    aether_ui_label(ox + 14, y, line1, C_DIM);
 }
 
 /* ================= 详情页 ================= */
@@ -289,7 +361,8 @@ void app_store_render(struct aether_win *w, int ox, int oy, int cw, int ch, stru
     }
     if (st->store_view == 0)      store_home(w, ox, oy, cw, ch, st);
     else if (st->store_view == 1) store_detail(w, ox, oy, cw, ch, st);
-    else                          store_search(w, ox, oy, cw, ch, st);
+    else if (st->store_view == 2) store_search(w, ox, oy, cw, ch, st);
+    else                          store_android(w, ox, oy, cw, ch, st);
 }
 
 static int store_hit_list(struct aether_win *w, struct app_state *st, int ox, int oy, int cw, int ch, int lx, int ly, int *idx)
@@ -332,6 +405,9 @@ void app_store_click(struct aether_win *w, int lx, int ly, int cw, int ch, struc
     if (st->store_view == 0) {
         /* 搜索胶囊 */
         if (hit(lx, ly, ox + 12, oy + 8, cw - 24, 40)) { st->store_view = 2; return; }
+        /* 「安卓应用」分类入口 */
+        int tabw = (cw - 36) / 2;
+        if (hit(lx, ly, ox + 24 + tabw, oy + 60, tabw, 34)) { st->store_view = 3; return; }
         int idx = -1, mode = store_hit_list(w, st, ox, oy, cw, ch, lx, ly, &idx);
         if (mode == 1) { st->store_sel = idx; st->store_view = 1; return; }
         if (mode == 2) {
@@ -357,6 +433,14 @@ void app_store_click(struct aether_win *w, int lx, int ly, int cw, int ch, struc
             } else if (a->kind == APP_NOTES) {
                 aether_desktop_uninstall(APP_NOTES); st->store_install = 0;
             }
+            return;
+        }
+    } else if (st->store_view == 3) {
+        /* 安卓应用分类页：安装入口在兼容层不可用时只提示，不伪造安装 */
+        int bw = cw - 24, bh = 46, bx = ox + 12, by = oy + 44 + 16 + 132 + 20 + 26 + 22 + 22 + 30;
+        if (hit(lx, ly, bx, by, bw, bh)) {
+            if (aether_android_status_int("state", AANDROID_UNKNOWN) == AANDROID_RUNNING)
+                st->store_view = 1;   /* 容器就绪时可进入安装流程 */
             return;
         }
     } else {
@@ -399,6 +483,7 @@ void app_store_cmd(struct aether_win *w, const char *line, struct app_state *st)
         if (!strcmp(arg, "home"))   { st->store_view = 0; st->store_install = 0; st->store_target = -1; return; }
         if (!strcmp(arg, "detail")) { st->store_sel = v; st->store_view = 1; return; }
         if (!strcmp(arg, "search")) { st->store_view = 2; st->store_qlen = 0; st->store_query[0] = 0; return; }
+        if (!strcmp(arg, "android")) { st->store_view = 3; return; }
         if (!strcmp(arg, "install")) {
             int idx = v; if (idx < 0 || idx >= STORE_N) return;
             st->store_target = (int)STORE[idx].kind;
