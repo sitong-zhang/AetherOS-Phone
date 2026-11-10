@@ -73,8 +73,32 @@ void aether_free_capture(unsigned *buf);
 void aether_draw_text(int x, int y, const char *s, unsigned rgb);          /* 纯 ASCII */
 void aether_draw_text_utf8(int x, int y, const char *s, unsigned rgb);     /* UTF-8 混合 */
 void aether_draw_text_scale(const char *s, int x, int y, int h, unsigned rgb); /* ASCII 按像素高 h 缩放 */
+int  aether_text_width_scale(const char *s, int h);                        /* 与 draw_text_scale 同公式的缩放后宽度 */
 int  aether_text_width(const char *s);                                     /* ASCII */
 int  aether_text_width_utf8(const char *s);                                /* UTF-8 混合 */
+
+/* ---- 字号感知排版（分册 §5.2 / §5.3） ----
+ * 旧接口固定 8x16 行盒，业务层不得再写死「(h - 16) / 2」这类居中公式：
+ * 矢量字体的真实 ascent/descent 与 16px 并不相等，descender 会被裁到行盒外。
+ * 新接口按 aether_vfont_metrics() 的真实度量计算
+ *   baseline = box_y + (line_h - (ascent + descent)) / 2 + ascent，
+ * 且 line_h 自动抬升到 >= ascent + descent + 4（上下各 2px 光栅余量）。
+ * aether_text_line_h()   该字号的行盒高（已含光栅余量）
+ * aether_text_ascent()/descent()  真实字体度量
+ * aether_text_box_y()     把行盒垂直居中于容器后，返回行盒顶部 y
+ * aether_draw_text_utf8_sized()  按指定字号绘制，y 为行盒顶部
+ * aether_draw_text_utf8_box()    盒内水平垂直居中 + 尾部省略号（不裁切、不半字）
+ */
+int  aether_text_line_h(int size);
+int  aether_text_ascent(int size);
+int  aether_text_descent(int size);
+int  aether_text_box_y(int box_y, int box_h, int size);
+int  aether_text_width_utf8_sized(const char *s, int size);
+void aether_draw_text_utf8_sized(int x, int y, const char *s, int size, unsigned rgb);
+/* 按 UTF-8 字符粒度截断并追加 U+2026 省略号（禁止半字、禁止 clip 代替） */
+void aether_text_fit_sized(char *dst, size_t cap, const char *src, int size, int maxpx);
+void aether_draw_text_utf8_box(int x, int y, int w, int h,
+                               const char *s, int size, unsigned rgb);
 
 /* ---- 控件图元 ---- */
 void aether_draw_border(int x, int y, int w, int h, unsigned rgb, int t);

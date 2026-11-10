@@ -106,6 +106,8 @@ unsigned aether_ui_state_color(char s);
 
 /* ---- 绘图 helper（ui.c 定义） ---- */
 int  aether_ui_hit(int lx, int ly, int x, int y, int w, int h);
+/* 命中区外扩 TK_HIT_SLOP 并保证不小于 TK_HIT_MIN(88x88)，分册 §3.8 */
+int  aether_ui_hit_min(int lx, int ly, int x, int y, int w, int h);
 void aether_ui_fit(char *dst, size_t cap, const char *src, int maxpx);
 void aether_ui_label(int x, int y, const char *s, unsigned c);
 void aether_ui_button(int x, int y, int w, int h, const char *s, unsigned bg, unsigned fg);

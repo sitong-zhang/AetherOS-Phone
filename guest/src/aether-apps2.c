@@ -19,6 +19,7 @@
 #include "aether-icons.h"
 #include "aether-appicons.h"
 #include "aether-ppm.h"
+#include "aether-tokens.h"   /* 全系统唯一参数真相源 */
 
 #include <dirent.h>
 #include <stdarg.h>
@@ -30,9 +31,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#define HEAD_H      54       /* 系统应用通用顶栏：大标题 + 右侧操作入口 */
-#define BODY_PAD    14
-#define STATUS_H    24       /* 底部状态栏（aether_ui_status 绘制） */
+/* 系统应用通用顶栏：与 aether-settings.c / aether-store.c 共用同一份令牌，
+ * 不再各写一遍 54 / 44（分册 §1 铁律五「参数只有一处真相」）。 */
+#define HEAD_H      TK_TITLEBAR_H   /* 96，容纳 88×88 返回命中区与大标题 */
+#define BODY_PAD    TK_BODY_PAD
+#define STATUS_H    TK_APP_STATUS_H
 #define WALL_DIR    "/usr/share/aether/wallpapers"
 #define CLIP_DIR    "/usr/share/aether/clips/loop"
 #define AUDIO_DIR   "/usr/share/aether/audio"
@@ -64,13 +67,35 @@ static long now_ms(void)
 /* ==================== 通用控件（一套控件语言，总纲 6.2） ==================== */
 static void hdr(int ox, int oy, int cw, const char *title, int back, const char *right)
 {
-    aether_fill_rect(ox, oy, cw, HEAD_H, C_PANEL);
-    aether_fill_rect(ox, oy + HEAD_H - 1, cw, 1, C_BORDER);
-    if (back) aether_draw_icon(AE_ICON_CHEVRON_LEFT, ox + 12, oy + (HEAD_H - 24) / 2, 24, C_TEXT);
-    aether_ui_label(ox + (back ? 44 : BODY_PAD), oy + (HEAD_H - 16) / 2 - 2, title, C_TEXT);
+    /* 应用内标题栏骨架（总纲 5.14 / 分册 §3.2、§5.3、§6.4）：
+     * 96px 高、左侧返回 32px 线性图标（命中区 88×88）、大标题 40px、
+     * 右侧操作入口 24px。文字一律走真实字体度量的行盒居中，不再写死 16。 */
+    const int H = TK_TITLEBAR_H;
+    const int ICON = 32;
+    aether_fill_rect(ox, oy, cw, H, C_PANEL);
+    aether_fill_rect(ox, oy + H - 1, cw, 1, C_BORDER);
+
+    char rbuf[64];
+    int rw = 0;
     if (right) {
-        int tw = aether_text_width_utf8(right);
-        aether_ui_label(ox + cw - BODY_PAD - tw, oy + (HEAD_H - 16) / 2 - 2, right, C_ACCENT);
+        aether_text_fit_sized(rbuf, sizeof rbuf, right, TK_T_BODY_2, cw / 2);
+        rw = aether_text_width_utf8_sized(rbuf, TK_T_BODY_2);
+    }
+    int tx = ox + (back ? TK_HIT_MIN - TK_S4 : BODY_PAD);
+    int maxw = cw - (tx - ox) - rw - BODY_PAD - (right ? TK_S3 : 0);
+    if (maxw < TK_S6) maxw = TK_S6;
+    char tbuf[128];
+    aether_text_fit_sized(tbuf, sizeof tbuf, title, TK_T_TITLE_2, maxw);
+    int ty = aether_text_box_y(oy, H, TK_T_TITLE_2);
+    aether_draw_text_utf8_sized(tx, ty, tbuf, TK_T_TITLE_2, C_TEXT);
+
+    if (back) {
+        int iy = oy + (H - ICON) / 2;
+        aether_draw_icon(AE_ICON_CHEVRON_LEFT, ox + TK_S3, iy, ICON, C_TEXT);
+    }
+    if (right) {
+        int ry = aether_text_box_y(oy, H, TK_T_BODY_2);
+        aether_draw_text_utf8_sized(ox + cw - BODY_PAD - rw, ry, rbuf, TK_T_BODY_2, C_ACCENT);
     }
 }
 

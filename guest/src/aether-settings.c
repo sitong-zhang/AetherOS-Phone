@@ -18,6 +18,7 @@
 #include "aether-render.h"
 #include "aether-icons.h"
 #include "aether-appicons.h"
+#include "aether-tokens.h"   /* 全系统唯一参数真相源 */
 
 #include <dirent.h>
 #include <stdarg.h>
@@ -30,9 +31,11 @@
 #include <time.h>
 #include <unistd.h>
 
-#define HEAD_H     54
-#define PAD        14
-#define STATUS_H   24
+/* 与 aether-apps2.c / aether-store.c 共用同一份标题栏与状态条令牌，
+ * 消除「同一语义在两个文件里出现两个值」（分册 §1 铁律五）。 */
+#define HEAD_H     TK_TITLEBAR_H   /* 96 */
+#define PAD        TK_BODY_PAD
+#define STATUS_H   TK_APP_STATUS_H
 #define MAX_ROWS   32
 #define DATA_DIR   "/data/aether"
 
@@ -741,10 +744,23 @@ static int slider_val(int lx, int x, int w, int max)
 }
 static void header(int ox, int oy, int cw, const char *title, int back)
 {
-    aether_fill_rect(ox, oy, cw, HEAD_H, C_PANEL);
-    aether_fill_rect(ox, oy + HEAD_H - 1, cw, 1, C_BORDER);
-    if (back) aether_draw_icon(AE_ICON_CHEVRON_LEFT, ox + 12, oy + (HEAD_H - 24) / 2, 24, C_TEXT);
-    aether_ui_label(ox + (back ? 44 : PAD), oy + (HEAD_H - 16) / 2 - 2, title, C_TEXT);
+    /* 与 apps2.c:hdr 同一套骨架：96px 顶栏、32px 返回图标（88×88 命中）、
+     * 40px 大标题，按真实字体度量居中（分册 §3.2 / §5.3 / §6.4）。 */
+    const int H = TK_TITLEBAR_H;
+    const int ICON = 32;
+    aether_fill_rect(ox, oy, cw, H, C_PANEL);
+    aether_fill_rect(ox, oy + H - 1, cw, 1, C_BORDER);
+    int tx = ox + (back ? TK_HIT_MIN - TK_S4 : PAD);
+    int maxw = cw - (tx - ox) - PAD;
+    if (maxw < TK_S6) maxw = TK_S6;
+    char tbuf[128];
+    aether_text_fit_sized(tbuf, sizeof tbuf, title, TK_T_TITLE_2, maxw);
+    int ty = aether_text_box_y(oy, H, TK_T_TITLE_2);
+    aether_draw_text_utf8_sized(tx, ty, tbuf, TK_T_TITLE_2, C_TEXT);
+    if (back) {
+        int iy = oy + (H - ICON) / 2;
+        aether_draw_icon(AE_ICON_CHEVRON_LEFT, ox + TK_S3, iy, ICON, C_TEXT);
+    }
 }
 
 static int row_height(const struct srow *r)

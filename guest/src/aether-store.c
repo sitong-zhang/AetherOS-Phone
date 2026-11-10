@@ -16,6 +16,7 @@
 #include "aether-appicons.h"
 #include "aether-android.h"   /* 安卓兼容层状态与降级提示 */
 #include "aether-glass-spec.h" /* 上游圆角 GLASS_RADIUS / GLASS_RADIUS_SMALL */
+#include "aether-tokens.h"   /* 全系统唯一参数真相源 */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -83,12 +84,24 @@ static void draw_stars(int x, int y, int rating_x10)
 /* ================= 顶部栏（标题 + 返回） ================= */
 int app_top_bar(struct aether_win *w, int ox, int oy, int cw, int ch, const char *title)
 {
+    /* 与 apps2.c:hdr / settings.c:header 同一套 96px 顶栏骨架（分册 §3.2）。
+     * 返回图标 32px，命中区由调用方按 TK_HIT_MIN(88) 外扩；标题按真实
+     * 字体度量行盒居中，不再写死「(h - 16) / 2」。 */
     (void)w; (void)ch;
-    aether_draw_round_rect(ox, oy, cw, 44, 12, C_PANEL, 0xFF);
-    aether_draw_border(ox, oy, cw, 44, C_BORDER, 1);
-    aether_draw_icon(AE_ICON_CHEVRON_LEFT, ox + 12, oy + 12, 22, C_TEXT);
-    aether_ui_label(ox + 44, oy + 14, title, C_TEXT);
-    return oy + 44;
+    const int H = TK_TITLEBAR_H;
+    const int ICON = 32;
+    aether_draw_round_rect(ox, oy, cw, H, TK_R_MD, C_PANEL, 0xFF);
+    aether_draw_border(ox, oy, cw, H, C_BORDER, 1);
+    int tx = ox + TK_HIT_MIN - TK_S4;
+    int maxw = cw - (tx - ox) - TK_BODY_PAD;
+    if (maxw < TK_S6) maxw = TK_S6;
+    char tbuf[128];
+    aether_text_fit_sized(tbuf, sizeof tbuf, title, TK_T_TITLE_2, maxw);
+    int ty = aether_text_box_y(oy, H, TK_T_TITLE_2);
+    aether_draw_text_utf8_sized(tx, ty, tbuf, TK_T_TITLE_2, C_TEXT);
+    int iy = oy + (H - ICON) / 2;
+    aether_draw_icon(AE_ICON_CHEVRON_LEFT, ox + TK_S3, iy, ICON, C_TEXT);
+    return oy + H;
 }
 
 /* ================= 首页 ================= */
@@ -386,8 +399,9 @@ static int store_hit_list(struct aether_win *w, struct app_state *st, int ox, in
 void app_store_click(struct aether_win *w, int lx, int ly, int cw, int ch, struct app_state *st)
 {
     int ox = w->x, oy = w->y;
-    /* 顶部栏返回（详情/搜索） */
-    if (st->store_view != 0 && hit(lx, ly, ox, oy, 56, 44)) {
+    /* 顶部栏返回（详情/搜索）：命中区外扩到 88×88，分册 §3.3 / §3.8 */
+    if (st->store_view != 0 &&
+        aether_ui_hit_min(lx, ly, ox + TK_S3, oy + (TK_TITLEBAR_H - 32) / 2, 32, 32)) {
         if (st->store_perm) { st->store_perm = 0; return; }
         st->store_view = 0; st->store_install = 0; st->store_target = -1; return;
     }

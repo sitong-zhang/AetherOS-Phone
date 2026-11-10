@@ -22,6 +22,8 @@
 #include "aether-island.h"
 #include "aether-discover.h"
 #include "aether-appdata.h"
+#include "aether-tokens.h"    /* 全系统唯一参数真相源（P0 结构纠偏） */
+#include "aether-material.h"  /* P1：M1–M12 配方 / 同帧模糊预算 / 全局按压 */
 #include "aether-android.h"   /* 安卓兼容层状态查询 */
 
 #include <stdio.h>
@@ -40,8 +42,26 @@ static struct aether_anim g_an_app;      /* 应用 从图标矩形放大展开 *
 static struct aether_anim g_an_unlock;   /* 解锁 图标从中心铺开 */
 static struct aether_anim g_an_island;   /* 灵动岛 连续形变 */
 static int g_page_dir = 1;               /* 换页方向 +1/-1 */
-static int g_app_from_x, g_app_from_y, g_app_from_s;  /* 启动动效起点（图标矩形） */
+static int g_app_from_x, g_app_from_y, g_app_from_w, g_app_from_h; /* 启动动效起点（来源图标矩形） */
+static struct aether_anim g_an_close;   /* 应用关闭：从全屏缩回来源矩形（返回视差） */
+static int g_closing = 0, g_closing_id = 0;
 static int g_last_state = 0, g_last_panel = 0, g_last_drawer = 0, g_last_page = 0;
+
+/* ---- P1 转场体系（分册 §8.5，可打断性为硬约束） ----
+ * 「窗口展开度 e」是唯一视觉真相源：0 = 来源图标矩形，1 = 全屏。
+ * 打开时 g_an_app: 当前 e → 1；返回时 g_an_close: 当前 e → 0。反向打断一律用
+ * aether_anim_begin_from() 从当前视觉值续接，不跳回起点重播（C02）。
+ * 曲线/时长统一取 aether-tokens.h 的 TK_D_MOVE(300) + C-INOUT。 */
+static int g_app_from_kind = -1;    /* 共享元素转场来源应用（图标绘制用） */
+/* g_an_panel / g_an_drawer 的视觉值区间统一为「浮层展开度 e」0..1：
+ * 打开 → 1、收起 → 0，两段式三个吸附点是 e 的中间值。反向打断一律用
+ * aether_anim_begin_from() 从当前 e 续接（C02），不再设独立的吸附/收起句柄。 */
+static double (*g_panel_curve)(double)  = aether_ease_out;
+static double (*g_drawer_curve)(double) = aether_ease_out;
+static double g_panel_e = 0.0, g_drawer_e = 0.0;  /* 每帧派生的当前视觉值 */
+static int g_panel_closing_type = 0;  /* 收起动画期间记录原面板类型（1/2） */
+static struct aether_anim g_an_cc_detail;    /* 二级面板从磁贴矩形展开 */
+static struct aether_anim g_an_edge;         /* 边缘右滑未达阈值时回弹 */
 
 static void sync_anim_starts(void);   /* 定义在全局状态声明之后 */
 static void ensure_wall_veil(void);   /* 磨砂玻璃遮罩层，定义在壁纸段之后 */
@@ -188,9 +208,37 @@ void aether_sys_apply(void)
     aether_anim_set_fx(fx);
 }
 
-/* 通知中心：3 条系统通知，逐条可清除 */
+/* 通知中心：3 条系统通知；支持侧滑清除（跟手淡出）、全部清除逐条依次消失、
+ * 通知历史入口（§5.9）。 */
+static const char *g_notif_titles[3] = { "系统已就绪", "安全隔离", "电量状态" };
 static int g_notif_n = 3;
 static int g_notif_on[3] = { 1, 1, 1 };
+static int g_notif_fx[3];        /* 单条淡出进度 0..100；>0 正在消失，100 即清除 */
+static int g_notif_clearing;     /* 全部清除序列进行中（自上而下逐条） */
+static int g_notif_hist_n;       /* 通知历史条数 */
+static char g_notif_hist[6][64]; /* 已清除通知标题（历史） */
+static int g_notif_history;      /* 历史二级页 0/1 */
+static int g_swipe_card = -1;    /* 跟手侧滑：当前拖拽的通知索引 */
+static int g_swipe_dx = 0;       /* 跟手位移 */
+
+/* ---- P1 两段式通知中心（分册 §10.9.3 / D03 / T-08~T-10） ----
+ * 分册给三吸附点 240 / 640 / 1280，基准是 360×640dp 逻辑画布；本系统
+ * fbdev 固定 720×1280 物理像素、状态栏 44 与三键导航栏 84 常驻，第三点
+ * 按总纲「按硬件自行调」取全展开可用高度 g_h-STATUS_H-NAV_H(=1152)，
+ * 不盖住导航栏。跟手期 1:1，松手按最近吸附点吸附，中途可反向打断。 */
+#define NOTIF_SNAP1  240
+#define NOTIF_SNAP2  640
+static int g_notif_h = 0;        /* 当前面板高度 px = full * g_panel_e（每帧派生） */
+static int g_notif_stage = 0;    /* 0 收起 / 1=240 / 2=640 / 3=全展开 */
+static int g_notif_drag = 0;     /* 展开度正在跟手拖拽 */
+static double g_notif_drag_e = 0;/* 拖拽起始展开度 */
+static int g_notif_drag_y = 0;   /* 拖拽起始触点 y */
+
+/* ---- P1 控制中心二级面板（分册 §10.10 / D04） ----
+ * 长按磁贴 TK_LONGPRESS_MS(400) 从磁贴矩形按 T-5 展开 M10 二级面板，
+ * 行高 96，内容取自统一系统设置总线（真实状态，不是演示假数据）。 */
+static int g_cc_detail = -1;             /* 二级面板对应磁贴索引，-1 = 关闭 */
+static int g_cc_detail_from[4] = {0,0,0,0}; /* 来源磁贴矩形 x,y,w,h */
 
 /* 真实系统指标（render 参数透传，供桌面小组件使用） */
 static double g_cpu, g_mem;
@@ -199,6 +247,24 @@ static double g_cpu, g_mem;
 static int g_pressed = 0;
 static int g_press_x, g_press_y, g_move_x, g_move_y;
 static int g_dragged = 0;
+
+/* 长按判定：down 记时刻，帧驱动 + up 兜底双路径（真机静态页不持续重绘时
+ * 仍能触发），g_longpress_fired 防止一次按下重复触发或误判成普通 tap。 */
+static long g_press_t0_ms = 0;
+static int  g_cc_press_idx = -1;
+static int  g_longpress_fired = 0;
+
+/* ---- P1 T-05 右滑返回（分册 §8.5 / 验收 C08） ----
+ * 应用内从左边缘 TK_EDGE_ZONE(24) 起手右滑，跟手 1:1；松手超过 35%W
+ * 返回桌面，否则按 C-ELASTIC 归位。TK_EDGE_SYS(8) 内只判系统手势、
+ * 不触发应用控件。本系统每个应用是单窗口、没有二级页面栈，按总纲
+ * 「故事性内容不死硬套」把 T-05 落地为窗口级返回（与 T-02 同一动作，
+ * 只是走跟手位移路径），不虚构一个假页面栈。 */
+static int g_edge_candidate = 0;   /* down 命中左边缘热区 */
+static int g_edge_active = 0;      /* 已确认为水平右滑跟手 */
+static int g_edge_sys = 0;         /* down 落在 8px 物理边缘内 */
+static int g_edge_x = 0;           /* 当前水平位移 */
+static int g_edge_from_x = 0;      /* C-ELASTIC 回弹起点 */
 
 /* 阶段 5：轻提示（toast），用于小窗第二请求等明确反馈 */
 static char g_toast[64] = "";
@@ -218,25 +284,172 @@ static int g_focus = 0;
 static int g_app_order[MAX_WINDOWS];
 static int g_app_n = 0;
 
-#define TOPBAR   32
-#define TITLEBAR 30
+/* TOPBAR 32 / TITLEBAR 30 已废弃：这两个宏从未被实际引用，真实条带由
+ * STATUS_H / NAV_H / DOCK_H 与系统应用的 HEAD_H 决定，且曾在三个文件里各写
+ * 一份（32 / 30 / 54 / 44）。P0 统一到 aether-tokens.h 的 TK_STATUS_H 44、
+ * TK_TITLEBAR_H 96，消除「同一语义两个值」。 */
+
+/* ================= P1 交互辅助（前向声明，定义在后文） ================= */
+static void cc_geom(int i, int *x, int *y, int *w, int *h);
+static void cc_toggle(int i);
+static void back_in_app(void);
+
+/* g_notif_pending：0 无 / 1 状态栏下拉候选 / 2 面板内拖拽候选。
+ * 曲线由 g_panel_curve 表达（T-08 C-BACK / T-09 C-OUT / T-10 C-INOUT）。 */
+static int g_notif_pending = 0;
+
+/* 三吸附点（含 stage0=收起），统一以「浮层展开度 e」表达。
+ * 分册 240 / 640 / 1280 在 720×1280 物理画布上映射成 e 的中间值，
+ * 全展开 e=1 对应可用高度，不覆盖常驻三键导航栏。 */
+static int notif_full_h(void)
+{
+    int full = g_h - STATUS_H - NAV_H;
+    return full < NOTIF_SNAP2 + 40 ? NOTIF_SNAP2 + 40 : full;
+}
+static void notif_snap_points(double out[4])
+{
+    double full = (double)notif_full_h();
+    out[0] = 0.0;
+    out[1] = (double)NOTIF_SNAP1 / full;
+    out[2] = (double)NOTIF_SNAP2 / full;
+    out[3] = 1.0;
+}
+static int notif_nearest_stage(double e)
+{
+    double s[4]; notif_snap_points(s);
+    int best = 0; double bd = 1e9;
+    for (int i = 0; i < 4; i++) {
+        double d = e - s[i]; if (d < 0) d = -d;
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
+/* 松手吸附：从当前展开度续接到目标吸附点。g_an_panel 的 from/to 直接就是
+ * 视觉值区间，反向打断天然不跳变（分册 §8.5 可打断硬约束 / 验收 C02）。 */
+static void notif_snap_to(int stage, double (*curve)(double), long dur_ms)
+{
+    double s[4]; notif_snap_points(s);
+    if (stage < 0) stage = 0;
+    if (stage > 3) stage = 3;
+    double cur = aether_anim_visual(&g_an_panel, g_panel_curve);
+    g_panel_curve = curve ? curve : aether_ease_out;
+    g_notif_stage = stage;
+    aether_anim_begin_from(&g_an_panel, dur_ms, cur, s[stage]);
+}
+/* 直接落到某一阶段（IPC / settle）：把句柄钉在终值，无动画、无活跃计数 */
+static void notif_set_stage(int stage)
+{
+    double s[4]; notif_snap_points(s);
+    if (stage < 0) stage = 0;
+    if (stage > 3) stage = 3;
+    g_notif_stage = stage;
+    g_panel_curve = aether_ease_out;
+    aether_anim_set(&g_an_panel, s[stage]);
+    g_panel_e = s[stage];
+    g_notif_h = (int)(notif_full_h() * s[stage] + 0.5);
+    g_last_panel = g_panel;   /* 已到位，sync_anim_starts 不再重复启动 */
+}
+/* 单击状态栏左区：目标阶段交给 sync_anim_starts 播放 materialize */
+static void notif_open(int stage)
+{
+    g_notif_stage = stage;
+    g_panel = 1; g_drawer = 0;
+}
+
+/* 二级面板矩形：分册 656×360（720 画布左右各 32），radius 40 = TK_R_XL */
+static void cc_detail_geom(int *x, int *y, int *w, int *h)
+{
+    *w = g_w - 64; if (*w > 656) *w = 656;
+    *h = 360;
+    *x = (g_w - *w) / 2;
+    *y = STATUS_H + ((g_h - STATUS_H - NAV_H) - *h) / 2;
+    if (*y < STATUS_H + 8) *y = STATUS_H + 8;
+}
+static void cc_detail_open(int idx)
+{
+    if (idx < 0 || idx >= 9) return;
+    cc_geom(idx, &g_cc_detail_from[0], &g_cc_detail_from[1],
+            &g_cc_detail_from[2], &g_cc_detail_from[3]);
+    g_cc_detail = idx;
+    aether_anim_begin(&g_an_cc_detail, TK_D_MATERIALIZE);
+}
+/* 二级面板三行动作：全部读写统一设置总线，无演示假数据 */
+static void cc_detail_action(int row)
+{
+    int i = g_cc_detail;
+    if (i < 0) return;
+    if (row == 0) { cc_toggle(i); return; }
+    if (row == 1) {
+        int key = (i == 7) ? SYS_BRIGHT : (i == 8) ? SYS_VOL_MEDIA : -1;
+        if (key >= 0) {
+            int v = aether_sys_get(key) - 25;
+            aether_sys_set(key, v < 0 ? 100 : v);
+            aether_sys_apply();
+        } else cc_toggle(i);
+        return;
+    }
+    g_cc_detail = -1;   /* 行 2：关闭面板 */
+}
+
+/* 长按每帧判定 + up 兜底共用：按住期间 kick 保持连续帧（静态页不持续重绘时
+ * 也能靠 up 的时间差触发），一次按下只触发一次。 */
+static void longpress_tick(void)
+{
+    if (!g_pressed) return;
+    if (g_panel != 2 || g_cc_detail >= 0 || g_cc_press_idx < 0) return;
+    aether_anim_kick();
+    if (g_longpress_fired || g_dragged) return;
+    if (aether_anim_now_ms() - g_press_t0_ms < TK_LONGPRESS_MS) return;
+    g_longpress_fired = 1;
+    cc_detail_open(g_cc_press_idx);
+}
 
 /* 状态变化时启动对应过渡；仅方向一致的进入，不做硬切（放在状态声明之后） */
 static void sync_anim_starts(void)
 {
+    /* 全局零初始化句柄的语义是「已完成/终态 1」，而浮层初始必须是收起 0。
+     * 首次进入时把两个句柄钉到 0，之后 value()/visual() 才读得到真实区间。 */
+    static int inited = 0;
+    if (!inited) {
+        aether_anim_set(&g_an_panel, 0.0);
+        aether_anim_set(&g_an_drawer, 0.0);
+        inited = 1;
+    }
+    /* P1：时长一律取自 aether-tokens.h 的 TK_D_* 阶梯，曲线按分册 §8.5
+     * 转场总表选。浮层统一用「展开度 e」视觉值区间（0 收起 / 1 展开），
+     * 打开与收起都走 begin_from() 从当前 e 续接，反向打断不跳变（C02）。 */
     if (g_page != g_last_page) {
         g_page_dir = g_page > g_last_page ? 1 : -1;
-        aether_anim_begin(&g_an_page, GLASS_ANIM_MS);        /* 200 <- glass_defaults.dart */
+        aether_anim_begin(&g_an_page, TK_D_MOVE);   /* T-页面位移 C-INOUT 300 */
         g_last_page = g_page;
         g_glass_gen++;              /* 下层桌面换页，玻璃盘子需重算 */
     }
     if (g_panel != g_last_panel) {
-        if (g_panel) aether_anim_begin(&g_an_panel, GLASS_ANIM_SLOW_MS);  /* 300 */
+        double cur = aether_anim_visual(&g_an_panel, g_panel_curve);
+        if (g_panel) {
+            double s[4]; notif_snap_points(s);
+            int st = g_notif_stage > 0 ? g_notif_stage : 3;
+            double target = (g_panel == 1) ? s[st] : 1.0;
+            /* T-08/T-09 通知中心 C-OUT 250；T-11 控制中心 C-BACK 250 */
+            g_panel_curve = (g_panel == 2) ? aether_ease_back : aether_ease_out;
+            g_panel_closing_type = 0;
+            aether_anim_begin_from(&g_an_panel, TK_D_MATERIALIZE, cur, target);
+        } else {
+            /* T-10/T-12 收起：C-INOUT 350，比进入慢 100ms（分册 §8.5） */
+            g_panel_closing_type = g_last_panel;   /* 记住收起的是哪个面板 */
+            g_panel_curve = aether_ease_in_out;
+            aether_anim_begin_from(&g_an_panel, TK_D_DEMATERIALIZE, cur, 0.0);
+        }
         g_last_panel = g_panel;
         g_glass_gen++;              /* 浮层开/合：一次新会话，重算一次 */
     }
     if (g_drawer != g_last_drawer) {
-        if (g_drawer) aether_anim_begin(&g_an_drawer, GLASS_MATERIALIZE_MS); /* 250 */
+        double cur = aether_anim_visual(&g_an_drawer, g_drawer_curve);
+        /* T-06 抽屉进入 C-OUT 250；T-07 收起 C-INOUT 350 */
+        g_drawer_curve = g_drawer ? aether_ease_out : aether_ease_in_out;
+        aether_anim_begin_from(&g_an_drawer,
+                               g_drawer ? TK_D_MATERIALIZE : TK_D_DEMATERIALIZE,
+                               cur, g_drawer ? 1.0 : 0.0);
         g_last_drawer = g_drawer;
         g_glass_gen++;
     }
@@ -311,6 +524,18 @@ static void default_geometry(enum app_kind k, int *w, int *h)
 }
 int aether_desktop_open(enum app_kind kind)
 {
+    /* 来源矩形兜底：未由 tap handler 显式设置时使用屏幕中心小矩形，
+     * 保证「从图标位置放大展开」转场任何入口都有合法起点（§5.13）。 */
+    if (g_app_from_w <= 0) {
+        g_app_from_x = g_w / 2 - 40; g_app_from_y = g_h / 2 - 40;
+        g_app_from_w = 80; g_app_from_h = 80;
+    }
+    /* T-01/T-02 可打断：窗口展开度 e 是唯一视觉真相源。若上一次返回动画
+     * 尚未结束就被重新打开，从它当前的 e 续接到 1，不跳回图标重播（C02）。 */
+    double start_e = g_closing
+        ? aether_anim_visual(&g_an_close, aether_ease_in_out) : 0.0;
+    g_closing = 0;
+    g_app_from_kind = (int)kind;
     for (int i = 0; i < MAX_WINDOWS; i++) {
         if (g_wins[i].used && g_wins[i].kind == kind) {
             g_focus = g_wins[i].id;
@@ -318,7 +543,7 @@ int aether_desktop_open(enum app_kind kind)
             for (int j = 0; j < g_app_n; j++) if (g_app_order[j] == (int)kind) { found = 1; break; }
             if (!found && g_app_n < MAX_WINDOWS) g_app_order[g_app_n++] = (int)kind;
             g_drawer = 0; g_panel = 0; g_state = PH_APP;
-            aether_anim_begin(&g_an_app, GLASS_MATERIALIZE_MS);   /* 250 */
+            aether_anim_begin_from(&g_an_app, TK_D_MOVE, start_e, 1.0);
             return g_wins[i].id;
         }
     }
@@ -340,7 +565,7 @@ int aether_desktop_open(enum app_kind kind)
         if (!dup) g_app_order[g_app_n++] = (int)kind;
     }
     g_drawer = 0; g_panel = 0; g_state = PH_APP;
-    aether_anim_begin(&g_an_app, GLASS_ANIM_SLOW_MS);   /* 300 <- glass_defaults.dart */
+    aether_anim_begin_from(&g_an_app, TK_D_MOVE, start_e, 1.0);
     return w->id;
 }
 void aether_desktop_close(int id)
@@ -485,10 +710,16 @@ int aether_desktop_aod(void) { return g_state == PH_AOD; }
 void aether_desktop_init(int w, int h)
 {
     g_w = w; g_h = h;
+    /* 条带只从 aether-tokens.h 取值：基准画布 720×1280 时恰为
+     * TK_STATUS_H(44) / TK_NAV_H(84) / TK_DOCK_H(140)；非基准分辨率按短边
+     * 比例缩放并钳制，避免出现第三套数值（分册 §1 铁律五）。 */
     int base = (w < h) ? w : h;
-    STATUS_H = base * 28 / 360; if (STATUS_H < 22) STATUS_H = 22; if (STATUS_H > 40) STATUS_H = 40;
-    NAV_H   = base * 60 / 360; if (NAV_H < 44) NAV_H = 44; if (NAV_H > 84) NAV_H = 84;
-    DOCK_H  = base * 112 / 360; if (DOCK_H < 88) DOCK_H = 88; if (DOCK_H > 150) DOCK_H = 150;
+    int pct = base * 100 / TK_SCREEN_W;
+    if (pct < 60)  pct = 60;
+    if (pct > 130) pct = 130;
+    STATUS_H = TK_STATUS_H * pct / 100;
+    NAV_H    = TK_NAV_H    * pct / 100;
+    DOCK_H   = TK_DOCK_H   * pct / 100;
     memset(g_wins, 0, sizeof g_wins);
     g_focus = 0; g_app_n = 0;
     g_state = PH_BOOT; g_drawer = 0; g_panel = 0; g_page = 0; g_theme = 0;
@@ -504,9 +735,11 @@ void aether_desktop_init(int w, int h)
     aether_neg1_invalidate();
 }
 
-/* ================= 渲染辅助 ================= */
+/* ================= 渲染辅助 =================
+ * 命中判定统一走 aether_ui_hit()（分册 §3.8 规则 3），外壳不再自写
+ * x>=.. && y>=.. 的判定式；需要 88×88 最小命中的控件走 aether_ui_hit_min()。 */
 static int hit(int lx, int ly, int x, int y, int w, int h)
-{ return lx >= x && ly >= y && lx < x + w && ly < y + h; }
+{ return aether_ui_hit(lx, ly, x, y, w, h); }
 
 static int battery_capacity(void)
 {
@@ -526,10 +759,10 @@ static void draw_app_tile(int kind, int x, int y, int size)
     aether_draw_icon_tile(id, x, y, size, glass,
                           pack_rgb(255, 255, 255),
                           aether_app_name((enum app_kind)kind), P_TEXT);
-    /* 触控按压反馈：按下提亮（上游 GLASS_AMBIENT_LIGHT_*），松开回落 */
-    if (g_pressed && g_mx >= x && g_mx < x + size
-        && g_my >= y && g_my < y + size) {
-        float lift = g_theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
+    /* 触控按压反馈：提亮量取材质层统一进度（§7.7 / C01，down 当帧可见）。
+     * 密集桌面磁贴只提亮、不做膨胀，避免相邻磁贴视觉重叠。 */
+    if (aether_material_pressed(x, y, size, size)) {
+        float lift = aether_material_press_lift(g_theme);
         aether_draw_round_rect(x, y, size, size, (int)(size * 0.22f),
                                pack_rgb(255, 255, 255),
                                (unsigned char)(int)(lift * 255.0f));
@@ -545,7 +778,9 @@ static void draw_status_bar(const char *clock)
     aether_fill_rect_alpha(0, STATUS_H - 1, g_w, 1, pack_rgb(255, 255, 255), 0x24);
     char tbuf[32];
     snprintf(tbuf, sizeof tbuf, "%s", (clock && clock[0]) ? clock : "--:--");
-    aether_draw_text_utf8(STATUS_H / 2, (STATUS_H - 16) / 2, tbuf, P_TEXT);
+    /* 行盒按真实 ascent/descent 居中（分册 §5.3），不再按固定 16px 字高硬居中 */
+    int text_y = aether_text_box_y(0, STATUS_H, TK_T_COMPAT);
+    aether_draw_text_utf8_sized(STATUS_H / 2, text_y, tbuf, TK_T_COMPAT, P_TEXT);
 
     int is = STATUS_H - 10; if (is < 16) is = 16;
     int iy = (STATUS_H - is) / 2;
@@ -556,7 +791,7 @@ static void draw_status_bar(const char *clock)
     /* 电量 */
     char cb[8]; snprintf(cb, sizeof cb, "%d", battery_capacity());
     int cw = aether_text_width(cb);
-    rx -= cw; aether_draw_text_utf8(rx, (STATUS_H - 16) / 2, cb, P_TEXT);
+    rx -= cw; aether_draw_text_utf8_sized(rx, text_y, cb, TK_T_COMPAT, P_TEXT);
     rx -= is + 4;
     aether_draw_icon(battery_capacity() < 20 ? AE_ICON_BATTERY_LOW : AE_ICON_BATTERY_FULL,
                      rx, iy, is, ic);
@@ -598,7 +833,8 @@ static void draw_search_pill(int top)
                        ? ph / 2 : (int)GLASS_RADIUS_CAPSULE,
                        GLASS_ROLE_NAV, pressed);
     aether_draw_icon(AE_ICON_SEARCH, 28, top + (ph - 24) / 2, 24, P_DIM);
-    aether_draw_text_utf8(62, top + (ph - 16) / 2, "搜索应用与内容", P_DIM);
+    int pill_y = aether_text_box_y(top, ph, TK_T_COMPAT);
+    aether_draw_text_utf8_sized(62, pill_y, "搜索应用与内容", TK_T_COMPAT, P_DIM);
     int is = 22;
     aether_draw_icon(AE_ICON_LAYOUT_GRID, 16 + pw - 34, top + (ph - is) / 2, is, P_DIM);
 }
@@ -609,6 +845,92 @@ static void draw_search_pill(int top)
 static unsigned char *g_wall_rgb = NULL;   /* 已解码壁纸像素（按路径缓存） */
 static int g_wall_sw = 0, g_wall_sh = 0;
 static char g_wall_path[256] = "";
+
+/* 「壁纸 + 遮罩」预合成背景层（分册 §14.2 / §4.5，总纲 5.5）。
+ * 清晰壁纸解码一次；按壁纸平均亮度在 [TK_WALL_SCRIM_MIN, TK_WALL_SCRIM_MAX]
+ * 间线性插值压一层黑罩（壁纸过亮自动加深，不为好看牺牲可读性）；顶部再叠
+ * 一段 0→12 的纵向加深，避免状态栏文字与亮壁纸打架。结果缓存成一整块图层，
+ * 逐帧只做行拷贝，不重复解码与逐像素混合 —— 这是 TCG 软渲染下的性能底线。 */
+static unsigned char *g_wall_layer = NULL;
+static int  g_wall_layer_pitch = 0, g_wall_layer_rows = 0;
+static int  g_wall_layer_valid = 0;
+static unsigned g_wall_layer_key = 0;
+static int  g_wall_scrim = TK_WALL_SCRIM_MIN;   /* 最近一次实际遮罩 alpha */
+
+/* Rec.709 近似亮度：32×32 网格抽样，按壁纸解码缓存只算一次 */
+static int wall_avg_luma(void)
+{
+    if (!g_wall_rgb || g_wall_sw <= 0 || g_wall_sh <= 0) return 128;
+    const int N = TK_WALL_LUMA_SAMPLES;
+    long sum = 0;
+    int n = 0;
+    for (int j = 0; j < N; j++) {
+        int sy = ((j * 2 + 1) * g_wall_sh) / (N * 2);
+        if (sy >= g_wall_sh) sy = g_wall_sh - 1;
+        for (int i = 0; i < N; i++) {
+            int sx = ((i * 2 + 1) * g_wall_sw) / (N * 2);
+            if (sx >= g_wall_sw) sx = g_wall_sw - 1;
+            const unsigned char *p = g_wall_rgb + ((size_t)sy * g_wall_sw + sx) * 3;
+            sum += (long)((p[0] * 54 + p[1] * 183 + p[2] * 19) >> 8);
+            n++;
+        }
+    }
+    return n > 0 ? (int)(sum / n) : 128;
+}
+
+static unsigned wall_layer_key(int scrim)
+{
+    unsigned h = 2166136261u;
+    for (const unsigned char *p = (const unsigned char *)g_wall_path; *p; p++) {
+        h ^= *p; h *= 16777619u;
+    }
+    h ^= (unsigned)scrim * 2654435761u;
+    return h + (unsigned)g_theme * 977u
+             + (unsigned)g_w * 104729u + (unsigned)g_h * 1299709u;
+}
+
+/* 返回 1 表示图层已构建并铺到当前画布 */
+static int build_wall_layer(int scrim)
+{
+    unsigned char *fb = NULL;
+    int fw = 0, fh = 0, fp = 0;
+    aether_render_framebuffer(&fb, &fw, &fh, &fp);
+    if (!fb || fp < g_w * 4 || fh < g_h || g_w <= 0 || g_h <= 0) return 0;
+
+    /* 行字节数与 framebuffer 一致：临时切换绘制目标时 set_px 按 g.pitch 寻址，
+     * 若二者不等会越界写。只拷每行前 g_w*4 个有效像素。 */
+    if (!g_wall_layer || g_wall_layer_rows != g_h || g_wall_layer_pitch != fp) {
+        free(g_wall_layer);
+        g_wall_layer = (unsigned char *)malloc((size_t)g_h * fp);
+        if (!g_wall_layer) return 0;
+        g_wall_layer_pitch = fp;
+        g_wall_layer_rows  = g_h;
+    }
+    aether_render_clear_clip();
+    aether_render_set_target(g_wall_layer);
+    if (g_wall_rgb && g_wall_sw > 0 && g_wall_sh > 0) {
+        aether_ppm_draw(g_wall_rgb, g_wall_sw, g_wall_sh, 0, 0, g_w, g_h, 3);
+    } else {
+        /* 解码失败兜底：品牌深蓝渐变，不是纯色、不是黑屏 */
+        aether_draw_vgradient(0, 0, g_w, g_h,
+                              pack_rgb(10, 14, 22), pack_rgb(24, 34, 56));
+    }
+    aether_fill_rect_alpha(0, 0, g_w, g_h, pack_rgb(0, 0, 0), (unsigned char)scrim);
+    int grad_h = TK_STATUS_H * 4;
+    if (grad_h > g_h / 3) grad_h = g_h / 3;
+    for (int y = 0; y < grad_h; y += 4) {
+        int a = TK_WALL_TOP_GRAD * (grad_h - y) / grad_h;
+        int bh = (y + 4 <= grad_h) ? 4 : grad_h - y;
+        if (a > 0 && bh > 0)
+            aether_fill_rect_alpha(0, y, g_w, bh, pack_rgb(0, 0, 0), (unsigned char)a);
+    }
+    aether_render_set_target(fb);
+    for (int y = 0; y < g_h; y++)
+        memcpy(fb + (size_t)y * fp,
+               g_wall_layer + (size_t)y * g_wall_layer_pitch,
+               (size_t)g_w * 4);
+    return 1;
+}
 
 static void draw_wallpaper(void)
 {
@@ -632,20 +954,41 @@ static void draw_wallpaper(void)
         g_glass_gen++;          /* 「设为壁纸」真实生效：下层变化，玻璃盘子需重算 */
         aether_neg1_invalidate();   /* 负一屏加深模糊背景同样基于壁纸 */
     }
-    /* 解码结果按路径缓存：动画连续帧不重复读盘/解析近 700KB PPM。
-     * 这是 ARM64 TCG 上控制中心动画不再拖垮串行 IPC 的另一半关键。 */
+    /* 解码结果按路径缓存：动画连续帧不重复读盘/解析近 700KB PPM。 */
     if (!g_wall_rgb || strcmp(path, g_wall_path)) {
         free(g_wall_rgb);
         g_wall_rgb = NULL;
         g_wall_path[0] = 0;
-        if (!aether_ppm_read(path, &g_wall_rgb, &g_wall_sw, &g_wall_sh)) {
+        if (aether_ppm_read(path, &g_wall_rgb, &g_wall_sw, &g_wall_sh))
+            snprintf(g_wall_path, sizeof g_wall_path, "%s", path);
+        else
             g_wall_rgb = NULL;
-            return;
-        }
-        snprintf(g_wall_path, sizeof g_wall_path, "%s", path);
     }
-    aether_ppm_draw(g_wall_rgb, g_wall_sw, g_wall_sh, 0, 0, g_w, g_h, 3);
-    aether_fill_rect_alpha(0, 0, g_w, g_h, pack_rgb(0, 0, 0), 34);
+
+    /* 亮度自适应遮罩：亮壁纸压到 35%，暗壁纸只压 13%（总纲 5.5 条件式，
+     * 分册 §4.5 的 0.35 作为上限而非固定值）。 */
+    int luma = wall_avg_luma();
+    int scrim = TK_WALL_SCRIM_MIN
+              + (TK_WALL_SCRIM_MAX - TK_WALL_SCRIM_MIN) * luma / 255;
+    g_wall_scrim = scrim;
+    unsigned key = wall_layer_key(scrim);
+    if (!g_wall_layer_valid || key != g_wall_layer_key) {
+        if (build_wall_layer(scrim)) {
+            g_wall_layer_key = key;
+            g_wall_layer_valid = 1;
+        }
+        return;
+    }
+    /* 复用已合成图层：逐帧只做行拷贝 */
+    unsigned char *fb = NULL;
+    int fw = 0, fh = 0, fp = 0;
+    aether_render_framebuffer(&fb, &fw, &fh, &fp);
+    if (fb && g_wall_layer && fp >= g_w * 4 && fh >= g_h) {
+        for (int y = 0; y < g_h; y++)
+            memcpy(fb + (size_t)y * fp,
+                   g_wall_layer + (size_t)y * g_wall_layer_pitch,
+                   (size_t)g_w * 4);
+    }
 }
 
 /* ---- 磨砂玻璃遮罩层 + 玻璃控件盘子（总纲 6.1 / 第七章性能降级） ----
@@ -769,8 +1112,14 @@ static void draw_glass_platter(int x, int y, int w, int h, int r,
     /* 触控按压反馈（glass_defaults.dart）：按下整体提亮
      * 浅色 +0.30 luma / 深色 +0.14 luma，随按压膨胀爬升、松开回落。 */
     if (pressed) {
-        float lift = g_theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
-        aether_draw_round_rect(x, y, w, h, r, pack_rgb(255, 255, 255),
+        /* P1 全局按压反馈（§7.7 / C01）：提亮量取材质层 0..1 进度，down
+         * 当帧即有可见起始量；膨胀 +TK_PRESS_INFLATE 只改视觉尺寸，
+         * 不改布局与命中区。两个玻璃控件入口共用这一份实现。 */
+        float lift = aether_material_press_lift(g_theme);
+        int inf = aether_material_press_inflate();
+        int d = inf / 2;
+        aether_draw_round_rect(x - d, y - d, w + inf, h + inf, r,
+                               pack_rgb(255, 255, 255),
                                (unsigned char)(int)(lift * 255.0f));
     }
 }
@@ -813,8 +1162,14 @@ static void draw_glass_control(int x, int y, int w, int h, int r,
                                pack_rgb(255, 255, 255),
                                (unsigned char)(spec_a / 2 + 1));
     if (pressed) {
-        float lift = g_theme == 1 ? GLASS_AMBIENT_LIGHT_L : GLASS_AMBIENT_LIGHT_D;
-        aether_draw_round_rect(x, y, w, h, r, pack_rgb(255, 255, 255),
+        /* P1 全局按压反馈（§7.7 / C01）：提亮量取材质层 0..1 进度，down
+         * 当帧即有可见起始量；膨胀 +TK_PRESS_INFLATE 只改视觉尺寸，
+         * 不改布局与命中区。两个玻璃控件入口共用这一份实现。 */
+        float lift = aether_material_press_lift(g_theme);
+        int inf = aether_material_press_inflate();
+        int d = inf / 2;
+        aether_draw_round_rect(x - d, y - d, w + inf, h + inf, r,
+                               pack_rgb(255, 255, 255),
                                (unsigned char)(int)(lift * 255.0f));
     }
 }
@@ -919,14 +1274,19 @@ static void draw_home(void)
 static void draw_lock(const char *clock)
 {
     /* 锁屏深/浅两套完整可用（总纲 5.4 / 6.4、禁止清单「深色只做一半」）。
-     * 浅色用同一套浅色壁纸铺底 + 极淡暗罩保证大时间可读；深色维持深蓝渐变。
-     * 这里只铺清晰壁纸、不做整屏模糊，避免重演串行 IPC 被渲染饿死。 */
+     * 两套都以真实壁纸为底（分册 §4.5 / 验收 B06），不再用纯色渐变冒充壁纸；
+     * 只铺清晰壁纸、不做整屏模糊，避免重演串行 IPC 被渲染饿死。
+     * 深色补足到 0.45 黑罩保证白色大时间可读；浅色沿用已验证的极淡蓝罩
+     * （浅色壁纸 + 深色大时间，压太暗反而降低对比度 —— 总纲 5.4
+     * 「不许为了好看牺牲可读性」优先于分册固定 0.45 数值）。 */
     int light = g_theme == 1;
+    draw_wallpaper();
     if (light) {
-        draw_wallpaper();
         aether_fill_rect_alpha(0, 0, g_w, g_h, pack_rgb(20, 28, 44), 46);
     } else {
-        aether_draw_vgradient(0, 0, g_w, g_h, pack_rgb(6, 12, 28), pack_rgb(4, 30, 52));
+        int extra = TK_WALL_SCRIM_LOCK - g_wall_scrim;
+        if (extra > 0)
+            aether_fill_rect_alpha(0, 0, g_w, g_h, pack_rgb(2, 6, 16), (unsigned char)extra);
     }
     unsigned c_big  = light ? pack_rgb(26, 34, 50)  : pack_rgb(244, 248, 255);
     unsigned c_date = light ? pack_rgb(64, 78, 100) : pack_rgb(178, 204, 230);
@@ -1028,13 +1388,18 @@ static void draw_boot(int elapsed)
         int px = cx + (int)(R * cos(rad)), py = cy + (int)(R * sin(rad));
         aether_draw_round_rect(px - 4, py - 4, 8, 8, 4, pack_rgb(200, 226, 255), 0xFF);
     }
-    /* 品牌字从无到有显影（用 alpha 递增） */
+    /* 品牌字从无到有显影（总纲 5.1）：alpha 按 elapsed 递增，真正生效。
+     * 宽度用与 draw_text_scale 同公式的 aether_text_width_scale() 度量——
+     * 旧代码用未缩放的 aether_text_width_utf8() 居中，88px 放大后实际宽
+     * 约 432px 却只按 72px 计算，右缘溢出 720 画布被裁掉半截。 */
     const char *logo = "Aether OS";
-    int lwpx = aether_text_width_utf8(logo);
     int fs = g_w * 60 / 360; if (fs < 34) fs = 34; if (fs > 88) fs = 88;
+    int lwpx = aether_text_width_scale(logo, fs);
+    int lx = g_w / 2 - lwpx / 2; if (lx < 8) lx = 8;
     unsigned char la = (unsigned char)(elapsed > 1 ? 255 : elapsed * 200 + 55);
-    (void)la;
-    aether_draw_text_scale(logo, g_w / 2 - lwpx / 2, cy + R + 40, fs, pack_rgb(150, 200, 255));
+    aether_render_set_alpha(la);
+    aether_draw_text_scale(logo, lx, cy + R + 40, fs, pack_rgb(150, 200, 255));
+    aether_render_set_alpha(0xFF);
     /* 细进度线，稳定走完，不跳数字 */
     int bw = g_w * 56 / 100, bx = (g_w - bw) / 2, by = g_h * 68 / 100, bh = 6;
     aether_draw_round_rect(bx, by, bw, bh, bh / 2, pack_rgb(30, 44, 70), 0xFF);
@@ -1107,6 +1472,14 @@ static void draw_overlay_backdrop(void)
      * 这里是对当前下层画布（含桌面图标）真算高斯，不是贴图；
      * fx=0（无障碍高对比）退化为实色，零模糊，性能兜底语义不变。 */
     if (!bits) return;
+    /* 同帧模糊预算登记（分册 §7.3 / E02）：浮层背景是本帧唯一一次真算模糊，
+     * 其余玻璃控件只从这块盘子取色、不再各自重算。登记仅用于可观测/断言，
+     * 不改变渲染路径——缓存命中时上面已 return，缓存失效时必须照常真算，
+     * 否则会出现「下层清晰桌面直接露出」的回归。 */
+    const struct aether_mat_recipe *m =
+        aether_material(g_panel == 1 ? AE_M5_NOTIF : AE_M6_CONTROL);
+    (void)aether_material_request_blur(0, y0, cw, ch,
+                                       m ? m->blur_px : TK_BLUR_MED);
     if (fx <= 0) {
         aether_fill_rect(0, y0, cw, ch, solid);
     } else {
@@ -1137,20 +1510,89 @@ static void draw_overlay_backdrop(void)
 }
 
 /* 通知中心：逐条卡片、可单条/全部清除，空状态有明确提示 */
+static int notif_card_at(int x, int y)
+{
+    if (g_panel != 1) return -1;
+    int yy = STATUS_H + 52;
+    for (int i = 0; i < 3; i++) {
+        if (!g_notif_on[i] || g_notif_fx[i]) continue;
+        if (x >= 14 && x < g_w - 14 && y >= yy && y < yy + 78) return i;
+        yy += 88;
+    }
+    return -1;
+}
+static void add_notif_hist(int i)
+{
+    if (g_notif_hist_n < 6) {
+        snprintf(g_notif_hist[g_notif_hist_n], 64, "%s", g_notif_titles[i]);
+        g_notif_hist_n++;
+    }
+}
+/* 每帧推进：单条淡出、全部清除序列、侧滑归零（§5.9 通知中心交互） */
+static void notif_tick(void)
+{
+    long now = aether_anim_now_ms();
+    static long last = 0;
+    int dt = (int)(now - last); last = now;
+    if (dt < 0 || dt > 120) dt = 16;
+    if (g_notif_clearing) {
+        int idx = -1;
+        for (int i = 0; i < 3; i++) if (g_notif_on[i] && !g_notif_fx[i]) { idx = i; break; }
+        if (idx >= 0) {
+            g_notif_fx[idx] += dt * 220 / 1000;   /* 自上而下，约 450ms/条 */
+            if (g_notif_fx[idx] >= 100) { g_notif_fx[idx] = 100; add_notif_hist(idx); g_notif_on[idx] = 0; }
+        } else {
+            g_notif_clearing = 0;
+        }
+    }
+    for (int i = 0; i < 3; i++) if (g_notif_fx[i] > 0 && g_notif_fx[i] < 100) {
+        g_notif_fx[i] += dt * 320 / 1000;
+        if (g_notif_fx[i] >= 100) { g_notif_fx[i] = 100; add_notif_hist(i); g_notif_on[i] = 0; }
+    }
+    if (!g_pressed) { g_swipe_card = -1; g_swipe_dx = 0; }
+}
+
 static void draw_notif_center(void)
 {
-    int ph = g_h * 60 / 100;
-    /* 下层已由 draw_overlay_backdrop 真算模糊：只压极淡遮罩保证可读性，
-     * 让虚化壁纸从卡片玻璃内透出，不盖成实色面板。 */
+    /* P1 两段式：板高 = 全展开可用高 × 当前展开度（由 render 每帧派生）。
+     * 内容按固定 y 布局、由外层 clip 到 g_notif_h 裁切，因此第一段(240)
+     * 只露出把手 + 标题 + 顶部卡片，继续下拉才逐级展开，符合 D03。 */
+    int ph = g_notif_h;
+    if (ph <= 0) return;
     aether_fill_rect_alpha(0, STATUS_H, g_w, ph, P_PANEL,
                            g_theme == 1 ? 0x28 : 0x58);
     aether_draw_border(0, STATUS_H, g_w, ph, P_BORDER, 1);
+    /* 顶部拖拽把手 48×4 胶囊（分册 §10.9.3）：明示可继续下拉 / 上推 */
+    aether_draw_round_rect(g_w / 2 - 24, STATUS_H + 6, 48, 4, 2, P_DIM, 0xB0);
     aether_draw_icon(AE_ICON_BELL, 20, STATUS_H + 12, 24, P_TEXT);
     aether_draw_text_utf8(52, STATUS_H + 16, "通知", P_TEXT);
-    int cw = aether_text_width_utf8("全部清除");
-    aether_draw_text_utf8(g_w - 20 - cw, STATUS_H + 16, "全部清除", P_ACCENT);
+    if (g_notif_clearing)
+        aether_draw_text_utf8(g_w - 20 - aether_text_width_utf8("清除中…"), STATUS_H + 16, "清除中…", P_DIM);
+    else
+        aether_draw_text_utf8(g_w - 20 - aether_text_width_utf8("全部清除"), STATUS_H + 16, "全部清除", P_ACCENT);
 
-    const char *titles[3] = { "系统已就绪", "安全隔离", "电量状态" };
+    if (g_notif_history) {
+        /* 通知历史二级页：从底部入口进入，可返回 */
+        aether_fill_rect_alpha(0, STATUS_H, g_w, g_h - STATUS_H - NAV_H, P_PANEL, 0xF4);
+        aether_draw_text_utf8(20, STATUS_H + 16, "通知历史", P_TEXT);
+        aether_draw_text_utf8(g_w - 56, STATUS_H + 16, "返回", P_ACCENT);
+        if (g_notif_hist_n == 0) {
+            /* 图标库无 history 符号，按分册 §6.6 回落同族通用符号 clock */
+            aether_draw_icon(AE_ICON_CLOCK, g_w / 2 - 24, STATUS_H + 120, 48, P_DIM);
+            const char *e = "暂无历史记录";
+            aether_draw_text_utf8(g_w / 2 - aether_text_width_utf8(e) / 2, STATUS_H + 184, e, P_DIM);
+        } else {
+            int y = STATUS_H + 60;
+            for (int i = 0; i < g_notif_hist_n && y < g_h - NAV_H - 40; i++, y += 44) {
+                draw_glass_control(14, y, g_w - 28, 36, (int)GLASS_RADIUS, GLASS_ROLE_OVERLAY, 0,
+                                   g_theme == 1 ? pack_rgb(236, 242, 252) : pack_rgb(22, 32, 52),
+                                   g_theme == 1 ? 0x90 : 0xA0);
+                aether_draw_text_utf8(28, y + 10, g_notif_hist[i], P_TEXT);
+            }
+        }
+        return;
+    }
+
     const int icons[3] = { AE_ICON_SHIELD, AE_ICON_SHIELD, AE_ICON_BATTERY_FULL };
     char bodies[3][96];
     snprintf(bodies[0], 96, "AetherOS 手机版启动完成，桌面可用");
@@ -1162,20 +1604,39 @@ static void draw_notif_center(void)
     for (int i = 0; i < 3; i++) {
         if (!g_notif_on[i]) continue;
         shown++;
-        int pressed = g_pressed && g_mx >= 14 && g_mx < g_w - 14
-                      && g_my >= y && g_my < y + 78;
-        draw_glass_control(14, y, g_w - 28, 78, (int)GLASS_RADIUS,
+        int ox = 14;
+        unsigned char alpha = 0xFF;
+        if (i == g_swipe_card) {                 /* 跟手侧滑：位移 + 淡出 */
+            ox += g_swipe_dx;
+            int a = 255 - (int)(fabs((double)g_swipe_dx) / (double)(g_w * 0.30) * 255.0);
+            alpha = (unsigned char)(a < 60 ? 60 : a);
+        } else if (g_notif_fx[i] > 0) {          /* 淡出中 */
+            alpha = (unsigned char)(255 - g_notif_fx[i] * 255 / 100);
+        }
+        int pressed = g_pressed && g_mx >= ox && g_mx < ox + g_w - 28 && g_my >= y && g_my < y + 78;
+        aether_render_set_alpha(alpha);
+        draw_glass_control(ox, y, g_w - 28, 78, (int)GLASS_RADIUS,
                            GLASS_ROLE_OVERLAY, pressed,
                            g_theme == 1 ? pack_rgb(236, 242, 252)
-                                        : pack_rgb(22, 32, 52),
-                           g_theme == 1 ? 0x90 : 0xA0);
-        aether_draw_border(14, y, g_w - 28, 78, P_BORDER, 1);
-        aether_draw_icon(icons[i], 28, y + 16, 26, P_ACCENT);
-        aether_draw_text_utf8(66, y + 14, titles[i], P_TEXT);
-        aether_draw_text_utf8(66, y + 42, bodies[i], P_DIM);
+                                        : pack_rgb(22, 32, 52), 0xFF);
+        aether_draw_border(ox, y, g_w - 28, 78, P_BORDER, 1);
+        aether_draw_icon(icons[i], ox + 14, y + 16, 26, P_ACCENT);
+        aether_draw_text_utf8(ox + 52, y + 14, g_notif_titles[i], P_TEXT);
+        aether_draw_text_utf8(ox + 52, y + 42, bodies[i], P_DIM);
+        aether_render_set_alpha(0xFF);
         y += 88;
     }
-    if (!shown) {
+    /* 底部通知历史入口（有记录时） */
+    if (g_notif_hist_n > 0 && !g_notif_clearing) {
+        int by = g_h - NAV_H - 44;
+        draw_glass_control(20, by, g_w - 40, 36, (int)GLASS_RADIUS_SMALL, GLASS_ROLE_OVERLAY, 0,
+                           g_theme == 1 ? pack_rgb(236, 242, 252) : pack_rgb(22, 32, 52),
+                           g_theme == 1 ? 0x88 : 0x98);
+        aether_draw_icon(AE_ICON_CLOCK, 32, by + 6, 24, P_ACCENT);   /* 同族回落，§6.6 */
+        aether_draw_text_utf8(66, by + 10, "通知历史", P_TEXT);
+        aether_draw_icon(AE_ICON_CHEVRON_RIGHT, g_w - 44, by + 6, 20, P_DIM);
+    }
+    if (!shown && !g_notif_clearing) {
         aether_draw_icon(AE_ICON_CHECK, g_w / 2 - 24, STATUS_H + 120, 48, P_DIM);
         const char *e = "暂无通知";
         aether_draw_text_utf8(g_w / 2 - aether_text_width_utf8(e) / 2, STATUS_H + 184, e, P_DIM);
@@ -1286,6 +1747,64 @@ static void draw_control_center(void)
                                (int)(bw * aether_sys_get(SYS_BRIGHT) / 100.0), 12, 6,
                                P_ACCENT, 0xFF);
     }
+
+    /* ---- P1 二级面板（D04 / T-5）：长按磁贴 400ms，从磁贴矩形展开 656×360 ----
+     * 软渲染下不新增全屏真算模糊（E02 / watchdog 边界）：复用本帧已有的
+     * 磨砂壁纸盘子，只叠 M10 的加重阴影 + 半透明玻璃罩，符合上游
+     * "Glass is a Platter, Not a Wrapper" 的层级规则。 */
+    if (g_cc_detail >= 0) {
+        double p = aether_anim_value(&g_an_cc_detail, aether_ease_out);
+        if (p < 0.0) p = 0.0; if (p > 1.0) p = 1.0;
+        int tx, ty, tw, th; cc_detail_geom(&tx, &ty, &tw, &th);
+        int rx = (int)aether_lerp((double)g_cc_detail_from[0], (double)tx, p);
+        int ry = (int)aether_lerp((double)g_cc_detail_from[1], (double)ty, p);
+        int rw = (int)aether_lerp((double)g_cc_detail_from[2], (double)tw, p);
+        int rh = (int)aether_lerp((double)g_cc_detail_from[3], (double)th, p);
+        if (rw > 40 && rh > 40) {
+            aether_fill_rect_alpha(0, STATUS_H, g_w, g_h - STATUS_H - NAV_H,
+                                   pack_rgb(0, 0, 0), (unsigned char)(120 * p));
+            const struct aether_mat_recipe *m = aether_material(AE_M10_SHEET);
+            int r = m ? m->radius_px : TK_R_XL;
+            if (r > rh / 2) r = rh / 2;
+            aether_draw_round_rect(rx - 8, ry + 14, rw + 16, rh, r + 2,
+                                   pack_rgb(0, 0, 0), 0x1F);
+            aether_draw_round_rect(rx - 4, ry + 6, rw + 8, rh, r,
+                                   pack_rgb(0, 0, 0), 0x3D);
+            unsigned tint = g_theme == 1 ? pack_rgb(240, 246, 255)
+                                         : pack_rgb(20, 30, 50);
+            aether_draw_round_rect(rx, ry, rw, rh, r, tint, 0xF2);
+            aether_draw_border(rx, ry, rw, rh, P_BORDER, 1);
+            /* T-5：矩形展开 60% 后内容才淡入，避免文字在变形中拉伸 */
+            if (p > 0.6) {
+                double ca = (p - 0.6) / 0.4;
+                aether_render_set_alpha((unsigned char)(ca * 255));
+                int i = g_cc_detail;
+                char title[64];
+                snprintf(title, sizeof title, "%s · 快捷设置", cc_tiles[i].name);
+                aether_draw_text_utf8(rx + TK_S6, ry + 16, title, P_TEXT);
+                const char *rows[3] = { "开 / 关", "减少一档", "关闭面板" };
+                for (int k = 0; k < 3; k++) {
+                    int yy = ry + 56 + k * 96;
+                    if (yy + 84 > ry + rh) break;
+                    int px = rx + 16, pw = rw - 32;
+                    draw_glass_control(px, yy, pw, 84, TK_R_MD,
+                                       GLASS_ROLE_OVERLAY,
+                                       aether_material_pressed(px, yy, pw, 84),
+                                       g_theme == 1 ? pack_rgb(236, 242, 252)
+                                                    : pack_rgb(28, 40, 62), 0xB0);
+                    aether_draw_icon(cc_tiles[i].icon, px + 16, yy + 28, 28, P_ACCENT);
+                    aether_draw_text_utf8(px + 60, yy + 30, rows[k], P_TEXT);
+                }
+                /* 真实状态：读写同一份系统设置总线，不用演示假数据 */
+                char st[64];
+                int key = (i == 7) ? SYS_BRIGHT : (i == 8) ? SYS_VOL_MEDIA : -1;
+                if (key >= 0) snprintf(st, sizeof st, "当前 %d%%", aether_sys_get(key));
+                else snprintf(st, sizeof st, "当前 %s", cc_on(i) ? "已开启" : "已关闭");
+                aether_draw_text_utf8(rx + TK_S6, ry + rh - 34, st, P_DIM);
+                aether_render_set_alpha(0xFF);
+            }
+        }
+    }
 }
 
 /* 应用抽屉：全屏玻璃面板，按网格列出全部应用，点击即开；从底栏中央上滑进入 */
@@ -1370,12 +1889,32 @@ void aether_desktop_render(const char *clock, double cpu, double mem)
     aether_island_tick();       /* 连续形变 / 计时 / 自动收起，每帧推进 */
     theme_palette();
     aether_ui_palette();        /* 灵动岛/负一屏/搜索复用同一套控件色板 */
+    /* P1 材质层：每帧清零模糊预算、注入触点、推进按压进度（爬升/回落曲线）。
+     * 全系统统一，业务控件只读查询结果，不各自接线（分册 §7.7 / C01）。 */
+    aether_material_begin_frame();
+    aether_material_set_touch(g_mx, g_my, g_pressed);
+    aether_material_tick();
     /* 全页面按压反馈：把本帧触点注入应用内控件层，所有应用/灵动岛按钮自动命中 */
     aether_ui_set_touch(g_mx, g_my, g_pressed);
     aether_render_clear_clip();
     aether_render_set_alpha(0xFF);
     aether_render_translate(0, 0);
     sync_anim_starts();
+    /* P1：每帧只推进一次浮层展开度并派生高度（value() 会回收到点句柄）。
+     * 打开 / 三段吸附 / 收起共用同一句柄，业务层只读派生结果。 */
+    g_panel_e  = aether_anim_value(&g_an_panel, g_panel_curve);
+    g_drawer_e = aether_anim_value(&g_an_drawer, g_drawer_curve);
+    if (g_panel_e  < 0.0) g_panel_e  = 0.0; if (g_panel_e  > 1.15) g_panel_e  = 1.15;
+    if (g_drawer_e < 0.0) g_drawer_e = 0.0; if (g_drawer_e > 1.15) g_drawer_e = 1.15;
+    double nh_e = g_panel_e > 1.0 ? 1.0 : g_panel_e;
+    g_notif_h = (int)(notif_full_h() * nh_e + 0.5);
+    /* T-05 右滑未达阈值：按 C-ELASTIC 把位移归位 */
+    if (aether_anim_running(&g_an_edge)) {
+        double e = aether_anim_value(&g_an_edge, aether_ease_elastic);
+        g_edge_x = (int)(g_edge_from_x * (1.0 - e));
+        if (g_edge_x < 0) g_edge_x = 0;
+    }
+    longpress_tick();       /* 长按磁贴：按住期间保持连续帧 */
     int now = (int)time(NULL);
 
     if (g_state == PH_BOOT) {
@@ -1419,14 +1958,54 @@ void aether_desktop_render(const char *clock, double cpu, double mem)
             draw_home();
     }
     else if (g_state == PH_APP) {
-        /* 应用从图标矩形放大展开：用全局 alpha 做内容淡入（5.13），
-         * 展开末期内容才完全显现，避免白/黑屏直跳。 */
-        if (aether_anim_running(&g_an_app)) {
-            double ap = aether_anim_value(&g_an_app, aether_ease_out);
-            aether_render_set_alpha((unsigned char)(ap * 255));
-        }
         struct aether_win *f = aether_desktop_focus();
-        if (f) draw_app_fullscreen(f); else draw_home();
+        /* T-01/T-02 统一视觉量 e：0 = 来源图标矩形，1 = 全屏。打开时
+         * g_an_app: cur→1，返回时 g_an_close: cur→0，反向打断不跳变。 */
+        double e = g_closing
+            ? aether_anim_value(&g_an_close, aether_ease_in_out)
+            : aether_anim_value(&g_an_app, aether_ease_in_out);
+        if (e < 0.0) e = 0.0; if (e > 1.0) e = 1.0;
+        int ch = g_h - STATUS_H - NAV_H;
+        int rx = (int)aether_lerp((double)g_app_from_x, 0.0, e);
+        int ry = (int)aether_lerp((double)g_app_from_y, (double)STATUS_H, e);
+        int rw = (int)aether_lerp((double)g_app_from_w, (double)g_w, e);
+        int rh = (int)aether_lerp((double)g_app_from_h, (double)ch, e);
+
+        /* T-05 右滑跟手：下层桌面完整显示（视差），应用整体右移让出左侧 */
+        if (g_edge_x > 0) {
+            draw_home();
+            aether_render_translate(g_edge_x, 0);
+            if (f) draw_app_fullscreen(f); else draw_home();
+            aether_render_translate(0, 0);
+        } else if (rw > 0 && rh > 0) {
+            /* T-02 返回视差：背景桌面不动，前景缩回来源矩形 */
+            if (g_closing) draw_home();
+            aether_render_set_clip(rx, ry, rw, rh);
+            /* T1 共享元素：来源图标固定在来源矩形原位，窗口内容以交叉 alpha
+             * 从该矩形放大铺满；图标启动 60% 淡出 / 返回 40% 淡入（§8.4）。 */
+            double icon_a = g_closing
+                ? (e < 0.4 ? (0.4 - e) / 0.4 : 0.0)
+                : (e < 0.6 ? 1.0 - e / 0.6 : 0.0);
+            double win_a = g_closing
+                ? (e > 0.4 ? 1.0 : e / 0.4)
+                : (e < 0.35 ? 0.0 : (e - 0.35) / 0.65);
+            if (icon_a > 0.001 && g_app_from_kind >= 0) {
+                aether_render_set_alpha((unsigned char)(icon_a * 255));
+                draw_app_tile(g_app_from_kind, g_app_from_x, g_app_from_y,
+                              g_app_from_w > 0 ? g_app_from_w : 80);
+                aether_render_set_alpha(0xFF);
+            }
+            aether_render_set_alpha((unsigned char)(win_a * 255));
+            if (f) draw_app_fullscreen(f); else draw_home();
+            aether_render_set_alpha(0xFF);
+            aether_render_clear_clip();
+        } else {
+            if (f) draw_app_fullscreen(f); else draw_home();
+        }
+        if (g_closing && !aether_anim_running(&g_an_close)) {
+            g_closing = 0; g_state = PH_HOME; g_focus = 0;
+            for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used) g_focus = g_wins[i].id;
+        }
     } else if (g_state == PH_RECENTS) {
         draw_recents();
     }
@@ -1439,24 +2018,34 @@ void aether_desktop_render(const char *clock, double cpu, double mem)
      * 主活动 + 侧边副活动并存；隐私面板由其内部按需绘制。 */
     aether_island_render(0, 0, g_w, g_h, g_theme, STATUS_H);
 
-    /* 覆盖层：先对下层画布做真算模糊（背景虚化），再按统一曲线带方向进入 */
-    if (g_drawer || g_panel) {
-        draw_overlay_backdrop();
-        if (g_panel) {
-            /* 两段下拉：前段模糊+放大时间，后段卡片进入；用曲线分两段体现 */
-            double p = aether_anim_value(&g_an_panel, aether_ease_out);
-            int ph = g_panel == 1 ? g_h * 60 / 100 : g_h * 66 / 100;
-            int dy = (int)((1.0 - p) * (-ph));   /* 从上方下拉进入 */
+    /* 覆盖层：展开度 >0 就继续绘制，收起动画期间 g_panel/g_drawer 已为 0，
+     * 但浮层仍按 e 淡出滑走，不做硬切（T-07 / T-10 / T-12）。 */
+    if (g_drawer || g_panel || g_drawer_e > 0.002 || g_panel_e > 0.002) {
+        /* 背景真算模糊只在「逻辑上仍打开」时铺：收起动画期间直接露出清晰
+         * 桌面，等价于分册 T-06/T-10 的 blur 24→0，也省一次全屏行拷贝。 */
+        if (g_drawer || g_panel) draw_overlay_backdrop();
+        int which = g_panel ? g_panel : g_panel_closing_type;
+        if (which == 1 && (g_panel || g_panel_e > 0.002)) {
+            /* 两段式只用「高度 = 全展开高 × 展开度」表达动效（跟手 1:1，
+             * 松手按 C-BACK/C-OUT 吸附），不叠 alpha 淡入：否则第一段吸附点
+             * e≈0.21 会把整块通知面板压成半透明，内容不可读。 */
+            aether_render_set_clip(0, STATUS_H, g_w, g_notif_h);
+            draw_notif_center();
+            aether_render_clear_clip();
+        } else if (which == 2 && (g_panel || g_panel_e > 0.002)) {
+            double pe = g_panel_e > 1.0 ? 1.0 : g_panel_e;
+            int cph = g_h * 66 / 100;
+            int dy = (int)((1.0 - pe) * (-cph));
             aether_render_translate(0, dy);
-            aether_render_set_alpha((unsigned char)(p * 255));
-            if (g_panel == 1) draw_notif_center(); else draw_control_center();
+            aether_render_set_alpha((unsigned char)(pe * 255));
+            draw_control_center();
             aether_render_translate(0, 0);
             aether_render_set_alpha(0xFF);
         } else {
-            double d = aether_anim_value(&g_an_drawer, aether_ease_out);
-            int dy = (int)((1.0 - d) * (g_h - STATUS_H));  /* 从底部上推 */
+            double de = g_drawer_e > 1.0 ? 1.0 : g_drawer_e;
+            int dy = (int)((1.0 - de) * (g_h - STATUS_H));
             aether_render_translate(0, dy);
-            aether_render_set_alpha((unsigned char)(d * 255));
+            aether_render_set_alpha((unsigned char)(de * 255));
             draw_drawer();
             aether_render_translate(0, 0);
             aether_render_set_alpha(0xFF);
@@ -1506,19 +2095,35 @@ static void unlock(void) {
     if (g_state == PH_BOOT) g_state = PH_LOCKED;
     if (g_state == PH_LOCKED) {
         g_state = PH_HOME;
-        aether_anim_begin(&g_an_unlock, GLASS_SPRING_MS); /* 500 <- glass_spring.dart */
+        /* T-32 锁屏解锁：600ms C-OUT 壁纸归位 + 图标铺开（分册 §8.5） */
+        aether_anim_begin(&g_an_unlock, TK_D_SLOW);
     }
 }
 static void go_home(void)
 {
-    if (g_state != PH_LOCKED) { g_state = PH_HOME; g_drawer = 0; g_panel = 0; }
+    if (g_state != PH_LOCKED) {
+        if (g_state == PH_APP && !g_closing) {
+            /* 底栏 HOME 键：T-02 从当前展开度续接回 0，缩回来源矩形 + 视差 */
+            double cur = aether_anim_visual(&g_an_app, aether_ease_in_out);
+            g_closing = 1; g_closing_id = g_focus;
+            aether_anim_begin_from(&g_an_close, TK_D_MOVE, cur, 0.0);
+        } else { g_drawer = 0; g_panel = 0; g_cc_detail = -1; g_state = PH_HOME; }
+    }
 }
 static void go_recents(void) { if (g_state != PH_LOCKED) { g_drawer = 0; g_panel = 0; g_state = (g_state == PH_RECENTS) ? PH_HOME : PH_RECENTS; } }
 static void back_in_app(void)
 {
-    if (g_state == PH_APP || g_state == PH_RECENTS) g_state = PH_HOME;
+    if (g_state == PH_APP) {
+        /* 返回键 / 边缘返回：T-02 从当前展开度续接回 0，缩回来源图标并淡出 */
+        if (!g_closing) {
+            double cur = aether_anim_visual(&g_an_app, aether_ease_in_out);
+            g_closing = 1; g_closing_id = g_focus;
+            aether_anim_begin_from(&g_an_close, TK_D_MOVE, cur, 0.0);
+        }
+    }
+    else if (g_state == PH_RECENTS) g_state = PH_HOME;
     else if (g_drawer) g_drawer = 0;
-    else if (g_panel) g_panel = 0;
+    else if (g_panel) { g_panel = 0; g_cc_detail = -1; g_notif_stage = 0; }
 }
 static void swipe(int dx, int dy)
 {
@@ -1540,7 +2145,8 @@ static void swipe(int dx, int dy)
     if (dy < -thr && dy < dx && dy < -dx) { if (g_state == PH_HOME) g_drawer = 1; return; }
     if (dy > thr && dy > dx && dy > -dx) {
         if (g_drawer) { g_drawer = 0; return; }
-        if (g_panel) { g_panel = 0; return; }
+        /* T-10 收起交给 sync_anim_starts 从当前展开度续接回 0（C-INOUT 350） */
+        if (g_panel) { g_panel = 0; g_cc_detail = -1; g_notif_stage = 0; return; }
         /* 主屏中线下拉唤出全局搜索（总纲 5.5） */
         if (g_state == PH_HOME && !aether_neg1_is_open()) {
             aether_search_open(1); return;
@@ -1557,6 +2163,8 @@ static void handle_home_tap(int x, int y)
         if (k < 0) continue;
         int tx, ty, sz; home_tile_rect(i, &tx, &ty, &sz);
         if (hit(x, y, tx - 6, ty - 6, sz + 12, sz + 34)) {
+            g_app_from_x = tx - 6; g_app_from_y = ty - 6;
+            g_app_from_w = sz + 12; g_app_from_h = sz + 34;
             aether_desktop_open((enum app_kind)k); return;
         }
     }
@@ -1577,6 +2185,8 @@ static void handle_drawer_tap(int x, int y)
     for (int k = 0; k < APP_COUNT; k++) {
         int tx, ty, sz; drawer_geom(k, &tx, &ty, &sz);
         if (hit(x, y, tx - 6, ty - 6, sz + 12, sz + 34)) {
+            g_app_from_x = tx - 6; g_app_from_y = ty - 6;
+            g_app_from_w = sz + 12; g_app_from_h = sz + 34;
             aether_desktop_open((enum app_kind)k); return;
         }
     }
@@ -1585,8 +2195,26 @@ static void handle_drawer_tap(int x, int y)
 
 static void handle_panel_tap(int x, int y)
 {
-    int ph = g_panel == 1 ? g_h * 60 / 100 : g_h * 66 / 100;
-    if (y < STATUS_H || y >= STATUS_H + ph) { g_panel = 0; return; }
+    /* 二级面板优先：点行执行真实动作，点面板外关闭（D04） */
+    if (g_panel == 2 && g_cc_detail >= 0) {
+        int px, py, pw, ph2; cc_detail_geom(&px, &py, &pw, &ph2);
+        if (hit(x, y, px, py, pw, ph2)) {
+            for (int k = 0; k < 3; k++) {
+                int yy = py + 56 + k * 96;
+                if (yy + 84 > py + ph2) break;
+                if (hit(x, y, px + 16, yy, pw - 32, 84)) {
+                    cc_detail_action(k); return;
+                }
+            }
+            return;
+        }
+        g_cc_detail = -1; return;
+    }
+    /* 通知中心的可见范围由两段式当前高度决定（D03） */
+    int ph = g_panel == 1 ? g_notif_h : g_h * 66 / 100;
+    if (y < STATUS_H || y >= STATUS_H + ph) {
+        g_panel = 0; g_cc_detail = -1; g_notif_stage = 0; return;
+    }
     if (g_panel == 1) {
         int cw = aether_text_width_utf8("全部清除");
         if (hit(x, y, g_w - 20 - cw - 8, STATUS_H + 8, cw + 16, 32)) {
@@ -1610,9 +2238,11 @@ static void handle_nav_tap(int x, int y)
 {
     int y0 = g_h - NAV_H;
     int bx0 = g_w * 16 / 100, cx = g_w / 2, bx2 = g_w * 84 / 100;
-    if (hit(x, y, bx0 - 30, y0, 60, NAV_H)) { back_in_app(); return; }
-    if (hit(x, y, cx - 30, y0, 60, NAV_H)) { go_home(); return; }
-    if (hit(x, y, bx2 - 30, y0, 60, NAV_H)) { go_recents(); return; }
+    /* 三个导航键命中区统一外扩到不小于 88×88（分册 §3.3 / §3.8）。
+     * 三键间距远大于 88，不会互相重叠；z 高者优先裁剪在这里天然成立。 */
+    if (aether_ui_hit_min(x, y, bx0 - 30, y0, 60, NAV_H)) { back_in_app(); return; }
+    if (aether_ui_hit_min(x, y, cx - 30, y0, 60, NAV_H))  { go_home(); return; }
+    if (aether_ui_hit_min(x, y, bx2 - 30, y0, 60, NAV_H)) { go_recents(); return; }
 }
 
 static void handle_app_tap(int x, int y)
@@ -1637,7 +2267,11 @@ static void handle_recents_tap(int x, int y)
             if (g_app_n == 0) g_state = PH_HOME;
             return;
         }
-        if (hit(x, y, 30, yy, card_w, card_h)) { aether_desktop_open(k); return; }
+        if (hit(x, y, 30, yy, card_w, card_h)) {
+            g_app_from_x = 30; g_app_from_y = yy;
+            g_app_from_w = card_w; g_app_from_h = card_h;
+            aether_desktop_open(k); return;
+        }
         yy += card_h + 12;
     }
     if (x < 30 || x > 30 + card_w) g_state = PH_HOME;
@@ -1691,12 +2325,75 @@ void aether_desktop_button(int x, int y, int down)
         g_pressed = 1; g_dragged = 0;
         g_press_x = g_move_x = x; g_press_y = g_move_y = y;
         g_mx = x; g_my = y;
+        g_press_t0_ms = aether_anim_now_ms();
+        g_longpress_fired = 0; g_cc_press_idx = -1;
+        g_notif_pending = 0; g_notif_drag = 0;
+        g_edge_candidate = 0; g_edge_active = 0; g_edge_sys = 0;
+        aether_anim_reset(&g_an_edge); g_edge_x = 0;
+        /* 状态栏左区下拉候选：两段式第一段从 e=0 跟手展开 */
+        if (g_panel == 0 && y < STATUS_H && x < g_w / 2) g_notif_pending = 1;
+        /* 面板内垂直拖拽候选：继续展开 / 收起 */
+        if (g_panel == 1 && y >= STATUS_H && y < STATUS_H + g_notif_h) g_notif_pending = 2;
+        /* 控制中心磁贴长按候选 */
+        if (g_panel == 2 && g_cc_detail < 0) {
+            for (int i = 0; i < 9; i++) {
+                int cx, cy, cw, chh; cc_geom(i, &cx, &cy, &cw, &chh);
+                if (hit(x, y, cx, cy, cw, chh)) { g_cc_press_idx = i; break; }
+            }
+        }
+        /* 应用内左边缘右滑返回候选（C08：8px 物理边缘只判系统手势） */
+        if (g_state == PH_APP && !g_closing && x <= TK_EDGE_ZONE
+            && y >= STATUS_H && y < g_h - NAV_H) {
+            g_edge_candidate = 1;
+            if (x < TK_EDGE_SYS) g_edge_sys = 1;
+        }
         return;
     }
     if (!g_pressed) return;
     g_pressed = 0;
     int dx = g_move_x - g_press_x, dy = g_move_y - g_press_y;
+
+    /* 长按已触发：本次按下不再当普通 tap，避免误触磁贴开关 */
+    if (g_longpress_fired) {
+        g_longpress_fired = 0; g_cc_press_idx = -1; g_dragged = 0;
+        g_notif_pending = 0; g_notif_drag = 0;
+        return;
+    }
+    /* up 兜底：静态页无连续帧时也能按时间差触发长按二级面板 */
+    if (g_cc_press_idx >= 0 && !g_dragged && g_panel == 2 && g_cc_detail < 0
+        && aether_anim_now_ms() - g_press_t0_ms >= TK_LONGPRESS_MS) {
+        cc_detail_open(g_cc_press_idx);
+        g_cc_press_idx = -1; g_notif_pending = 0;
+        return;
+    }
+    /* 两段式通知中心：跟手结束按最近吸附点吸附（T-08 C-BACK / T-09 C-OUT） */
+    if (g_notif_drag) {
+        g_notif_drag = 0; g_notif_pending = 0; g_dragged = 0;
+        if (g_panel == 1) {
+            int stage = notif_nearest_stage(g_panel_e);
+            if (stage == 0) { g_panel = 0; g_notif_stage = 0; }  /* T-10 收起 */
+            else notif_snap_to(stage,
+                               stage == 1 ? aether_ease_back : aether_ease_out,
+                               stage == 1 ? TK_D_MATERIALIZE : TK_D_MOVE);
+        }
+        return;
+    }
+    g_notif_pending = 0;
+    /* T-05 右滑返回：超过 35%W 返回桌面，否则按 C-ELASTIC 归位 */
+    if (g_edge_active) {
+        g_edge_active = 0; g_edge_candidate = 0; g_dragged = 0;
+        if (g_edge_x > g_w * 35 / 100) {
+            g_edge_x = 0; g_edge_sys = 0;
+            back_in_app();
+        } else {
+            g_edge_from_x = g_edge_x;
+            aether_anim_begin(&g_an_edge, TK_D_MATERIALIZE);
+        }
+        return;
+    }
     if (g_dragged) { swipe(dx, dy); return; }
+    /* 8px 物理边缘只响应系统手势，不触发应用内控件（验收 C08） */
+    if (g_edge_sys) { g_edge_sys = 0; return; }
 
     int tx = x, ty = y;
     g_mx = tx; g_my = ty;
@@ -1757,8 +2454,13 @@ void aether_desktop_button(int x, int y, int down)
         return;
     }
 
-    /* 状态栏左右分区：左=通知中心，右=控制中心 */
-    if (ty < STATUS_H) { g_panel = (tx < g_w / 2) ? 1 : 2; g_drawer = 0; return; }
+    /* 状态栏左右分区：左=通知中心（单击直达全展开，走 materialize），
+     * 右=控制中心（C-BACK 250）。两段式第一段由状态栏下拉跟手进入。 */
+    if (ty < STATUS_H) {
+        if (tx < g_w / 2) notif_open(3);
+        else { g_notif_stage = 3; g_panel = 2; g_drawer = 0; g_cc_detail = -1; }
+        return;
+    }
     if (ty >= g_h - NAV_H) { handle_nav_tap(tx, ty); return; }
     if (g_panel) { handle_panel_tap(tx, ty); return; }
     if (g_drawer) { handle_drawer_tap(tx, ty); return; }
@@ -1790,8 +2492,41 @@ void aether_desktop_motion(int x, int y)
     if (g_pressed) {
         g_move_x = x; g_move_y = y;
         int dx = x - g_press_x, dy = y - g_press_y;
-        if (dx < 0) dx = -dx; if (dy < 0) dy = -dy;
-        if (dx > 8 || dy > 8) g_dragged = 1;
+        int adx = dx < 0 ? -dx : dx, ady = dy < 0 ? -dy : dy;
+
+        /* 两段式通知中心：垂直方向锁定后，展开度按 1:1 跟手（C06） */
+        if (g_notif_pending && ady > TK_DIRECTION_LOCK && ady > adx) {
+            g_notif_drag = 1;
+            g_notif_pending = 0;
+            g_notif_drag_e = g_panel_e;
+            g_notif_drag_y = g_press_y;
+            g_dragged = 1;
+        }
+        if (g_notif_drag) {
+            double e = g_notif_drag_e
+                     + (double)(y - g_notif_drag_y) / (double)notif_full_h();
+            if (e < 0.0) e = 0.0; if (e > 1.0) e = 1.0;
+            aether_anim_set(&g_an_panel, e);   /* 钉住当前值，吸附动画不残留推进 */
+            g_panel_e = e;
+            g_notif_h = (int)(notif_full_h() * e + 0.5);
+            g_notif_stage = notif_nearest_stage(e);
+            if (g_panel == 0 && e > 0.002) {
+                g_panel = 1; g_drawer = 0;
+                g_last_panel = 1;   /* 跟手已接管，sync 不再重复 materialize */
+                g_glass_gen++;      /* 背景玻璃只重算一次 */
+            }
+            aether_anim_kick();
+            return;
+        }
+        /* T-05 边缘右滑：水平方向锁定后 1:1 跟手 */
+        if (g_edge_candidate && dx > TK_DIRECTION_LOCK && adx > ady) {
+            g_edge_active = 1;
+            g_edge_x = dx; if (g_edge_x > g_w) g_edge_x = g_w;
+            g_dragged = 1;
+            aether_anim_kick();
+            return;
+        }
+        if (adx > 8 || ady > 8) g_dragged = 1;
     }
 }
 
@@ -1814,15 +2549,31 @@ void aether_desktop_key(unsigned code, int shift)
 /* ================= 状态与 IPC ================= */
 void aether_desktop_settle(void)
 {
-    /* 取证/自动化：把过渡直接推到完成态，画面呈现确定的终态；
-     * 真机触摸路径不调用它，动效照常播放。aether_anim_reset 之后
-     * aether_anim_value() 返回 1，running() 返回 0。 */
-    aether_anim_reset(&g_an_panel);
-    aether_anim_reset(&g_an_drawer);
+    /* 取证/自动化：把过渡直接推到完成态，画面呈现确定的终态；真机触摸
+     * 路径不调用它，动效照常播放。P1：浮层展开度、抽屉、共享元素、边缘
+     * 回弹、二级面板全部钉到终值，不留下活跃计数（E06 静态页不持续重绘）。 */
     aether_anim_reset(&g_an_page);
     aether_anim_reset(&g_an_app);
     aether_anim_reset(&g_an_unlock);
     aether_anim_reset(&g_an_island);
+    aether_anim_reset(&g_an_close);
+    aether_anim_reset(&g_an_edge);
+    aether_anim_set(&g_an_cc_detail, g_cc_detail >= 0 ? 1.0 : 0.0);
+    double e;
+    if (g_panel == 1) {
+        double s[4]; notif_snap_points(s);
+        e = s[g_notif_stage > 0 ? g_notif_stage : 3];
+    } else e = (g_panel == 2) ? 1.0 : 0.0;
+    aether_anim_set(&g_an_panel, e);
+    g_panel_e = e;
+    g_notif_h = (int)(notif_full_h() * (e > 1.0 ? 1.0 : e) + 0.5);
+    aether_anim_set(&g_an_drawer, g_drawer ? 1.0 : 0.0);
+    g_drawer_e = g_drawer ? 1.0 : 0.0;
+    g_notif_drag = 0; g_notif_pending = 0;
+    g_edge_x = 0; g_edge_active = 0; g_edge_candidate = 0; g_edge_sys = 0;
+    g_longpress_fired = 0; g_cc_press_idx = -1;
+    if (g_closing) { g_closing = 0; g_state = PH_HOME; g_focus = 0;
+        for (int i = 0; i < MAX_WINDOWS; i++) if (g_wins[i].used) g_focus = g_wins[i].id; }
     aether_island_settle();
     g_last_state = g_state; g_last_panel = g_panel;
     g_last_drawer = g_drawer; g_last_page = g_page;
@@ -1843,14 +2594,19 @@ void aether_desktop_state(char *buf, size_t sz)
         "{\"state\":%d,\"app\":%d,\"panel\":%d,\"drawer\":%d,\"page\":%d,\"locked\":%d,"
         "\"theme\":%d,\"open\":%d,\"wifi\":%d,\"bt\":%d,\"bright\":%d,\"vol\":%d,"
         "\"aod\":%d,\"user_n\":%d,\"float\":%d,\"float_kind\":%d,"
-        "\"island\":%s,\"search\":%s,\"neg1\":%s,\"wins\":[",
+        "\"island\":%s,\"search\":%s,\"neg1\":%s,"
+        "\"notif_h\":%d,\"notif_stage\":%d,\"panel_e\":%.3f,\"cc_detail\":%d,"
+        "\"edge_x\":%d,\"blur\":%d,\"press\":%.3f,\"wins\":[",
         g_state, (int)fk, g_panel, g_drawer, g_page, (g_state == PH_LOCKED) ? 1 : 0,
         g_theme, g_app_n,
         aether_sys_get(SYS_WIFI), aether_sys_get(SYS_BT),
         aether_sys_get(SYS_BRIGHT), aether_sys_get(SYS_VOL_MEDIA),
         aether_desktop_aod() ? 1 : 0, g_user_n, aether_desktop_float_active() ? 1 : 0,
         aether_desktop_float_active() ? aether_desktop_float_kind() : -1,
-        isj, ssj, nsj);
+        isj, ssj, nsj,
+        g_notif_h, g_notif_stage, g_panel_e, g_cc_detail,
+        g_edge_x, aether_material_blur_budget(),
+        (double)aether_material_press_k(g_theme));
     int first = 1;
     for (int i = 0; i < MAX_WINDOWS; i++) {
         struct aether_win *w = &g_wins[i];
@@ -1904,7 +2660,33 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
     if (!strcmp(cmd, "panel")) {
         int v = 0; sscanf(line, "%*s %d", &v);
         g_panel = (v == 1 || v == 2) ? v : 0; g_drawer = 0;
+        g_cc_detail = -1;
+        /* 取证默认全展开，保持既有深/浅两套通知中心截图的语义 */
+        if (g_panel == 1) g_notif_stage = 3;
+        else if (!g_panel) g_notif_stage = 0;
         snprintf(reply, sz, "{\"ok\":true}\n"); return;
+    }
+    /* P1 取证：通知中心三吸附点（0 收起 / 1=240 / 2=640 / 3=全展开）。
+     * 真机路径是状态栏下拉跟手 + 松手吸附，此命令只用于确定性截图。 */
+    if (!strcmp(cmd, "notif")) {
+        int v = 0; sscanf(line, "%*s %d", &v);
+        if (v < 0) v = 0; if (v > 3) v = 3;
+        g_panel = 1; g_drawer = 0; g_cc_detail = -1;
+        notif_set_stage(v);
+        snprintf(reply, sz, "{\"ok\":true,\"stage\":%d,\"h\":%d}\n", v, g_notif_h);
+        return;
+    }
+    /* P1 取证：控制中心二级面板（真机路径为长按磁贴 400ms） */
+    if (!strcmp(cmd, "ccdetail")) {
+        int v = -1; sscanf(line, "%*s %d", &v);
+        g_panel = 2; g_drawer = 0;
+        aether_anim_set(&g_an_panel, 1.0); g_panel_e = 1.0;
+        g_last_panel = 2;
+        if (v >= 0 && v < 9) cc_detail_open(v);
+        else g_cc_detail = -1;
+        aether_anim_set(&g_an_cc_detail, 1.0);
+        snprintf(reply, sz, "{\"ok\":true,\"cc_detail\":%d}\n", g_cc_detail);
+        return;
     }
     if (!strcmp(cmd, "page")) {
         int v = 0; sscanf(line, "%*s %d", &v);

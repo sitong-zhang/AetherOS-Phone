@@ -11,6 +11,7 @@
 #include "aether-glass-spec.h"
 #include "aether-icons.h"
 #include "aether-appdata.h"
+#include "aether-tokens.h"   /* 全系统唯一参数真相源 */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -367,8 +368,10 @@ static void scene_content(int s, struct island_act *a, int x, int y, int w, int 
             t[0] = 0;
             snprintf(t, sizeof t, "%.23s", SCENE_NAME[s]);
         }
-        aether_draw_text_utf8(x + w - 12 - aether_text_width_utf8(t),
-                              y + (h - 16) / 2, t, tx);
+        /* 行盒按真实 ascent/descent 居中，消除固定 16px 字高硬居中（§5.3） */
+        int ty = aether_text_box_y(y, h, TK_T_COMPAT);
+        aether_draw_text_utf8_sized(x + w - 12 - aether_text_width_utf8(t),
+                                    ty, t, TK_T_COMPAT, tx);
         return;
     }
 

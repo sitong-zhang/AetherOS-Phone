@@ -30,6 +30,7 @@
 #endif
 #include "aether-logo.h"
 #include "aether-glass.h"
+#include "aether-tokens.h"
 
 static struct render_fb g;
 static int g_clip_on = 0, g_cx = 0, g_cy = 0, g_cw = 0, g_ch = 0;
@@ -371,6 +372,180 @@ void aether_draw_text_scale(const char *s, int x, int y, int h, unsigned rgb)
 
 #endif /* AETHER_VECTOR_FONT */
 
+/* 与 aether_draw_text_scale() 完全同公式的缩放后宽度（两个字体后端共用）。
+ * draw_text_scale 把每个 ASCII 字符放大为 scale=ceil(h/FONT_H) 倍、
+ * 步进 FONT_W*scale 像素；旧代码却用未缩放的 aether_text_width_utf8()
+ * 去居中，导致大字号字标右缘溢出屏幕被裁（开机动画 "Aether OS" 即此因）。 */
+int aether_text_width_scale(const char *s, int h)
+{
+    if (h <= 0 || !s) return 0;
+    int scale = (h + (int)AETHER_FONT_H - 1) / (int)AETHER_FONT_H;
+    if (scale < 1) scale = 1;
+    return (int)strlen(s) * (int)AETHER_FONT_W * scale;
+}
+
+/* ==================== 字号感知排版（分册 §5.2 / §5.3 / §5.5） ====================
+ * 旧接口固定 8x16 行盒，业务层曾写死「(h - 16) / 2」做垂直居中；矢量字体
+ * 真实 ascent/descent 之和并不等于 16px，descender（g / p / y / 竖 / 鄴）
+ * 会落到行盒外被裁。这里提供按真实字体度量计算基线的统一入口：
+ *
+ *   line_h  = max(ceil(size * 1.5), ascent + descent + 4)
+ *   baseline = y + (line_h - (ascent + descent)) / 2 + ascent
+ *
+ * 字形位图左上角 = (x + (cell_w - w) / 2, baseline + y0)，y0 为 stbtt
+ * 相对基线的偏移（负值）。缺字回落 U+25A1 □，不静默留白。
+ * 字符步进沿用「ASCII 半宽 / 其他全宽」的实调格子：size=16 时恰为 8/16，
+ * 与既有 8x16 布局完全一致，因此新增字号不会改动任何既有界面坐标。 */
+static int sized_cell_w(unsigned cp, int size)
+{
+    int half = size / 2;
+    if (half < 1) half = 1;
+    return cp >= 0x80 ? size : half;   /* 全角方块 / 半角拉丁 */
+}
+
+int aether_text_width_utf8_sized(const char *s, int size)
+{
+    if (size < 1) size = TK_T_COMPAT;
+    int w = 0;
+    unsigned cp;
+    const char *p = s;
+    while (utf8_next(&p, &cp)) w += sized_cell_w(cp, size);
+    return w;
+}
+
+int aether_text_ascent(int size)
+{
+    if (size < 1) size = TK_T_COMPAT;
+    int a = 0, d = 0;
+#ifdef AETHER_VECTOR_FONT
+    if (aether_vfont_metrics(size, &a, &d)) return a;
+#endif
+    a = size * 4 / 5;  /* 点阵回退：8x16 点阵的近似度量 */
+    return a > 0 ? a : 1;
+}
+
+int aether_text_descent(int size)
+{
+    if (size < 1) size = TK_T_COMPAT;
+    int a = 0, d = 0;
+#ifdef AETHER_VECTOR_FONT
+    if (aether_vfont_metrics(size, &a, &d)) return d;
+#endif
+    d = size - (size * 4 / 5);
+    return d >= 0 ? d : 0;
+}
+
+int aether_text_line_h(int size)
+{
+    if (size < 1) size = TK_T_COMPAT;
+    int lh = TK_LINE_H(size);
+    int need = aether_text_ascent(size) + aether_text_descent(size) + 4;
+    if (lh < need) lh = need;          /* 上下各 2px 光栅余量，不得裁切 */
+    return lh;
+}
+
+int aether_text_box_y(int box_y, int box_h, int size)
+{
+    int lh = aether_text_line_h(size);
+    if (box_h <= lh) return box_y;     /* 容器不足时保顶不保底 */
+    return box_y + (box_h - lh) / 2;
+}
+
+static void draw_cell_sized(int x, int y, unsigned cp, int cell_w,
+                            int size, int line_h, unsigned rgb)
+{
+#ifdef AETHER_VECTOR_FONT
+    const struct aether_glyph *gl = aether_vfont_get(cp, size);
+    if (!gl) gl = aether_vfont_get(0x25A1, size);   /* □ 缺字回落 */
+    if (!gl || gl->w <= 0 || gl->h <= 0) return;
+    int asc = gl->asc_px;
+    int desc = aether_text_descent(size);
+    int baseline = y + (line_h - (asc + desc)) / 2 + asc;
+    int py = baseline + gl->y0;
+    int px = x + (cell_w - gl->w) / 2;
+    for (int r = 0; r < gl->h; r++) {
+        for (int c = 0; c < gl->w; c++) {
+            unsigned char a = gl->alpha[(size_t)r * gl->w + c];
+            if (a) aether_blend_pixel(px + c, py + r, rgb, a);
+        }
+    }
+#else
+    /* 点阵回退后端只有 8x16 / 16x16 固定字形，不支持任意字号放大；
+     * 按真实行盒居中绘制 16px 字形，保证文字完整可见、不裁切。 */
+    int gy = y + (line_h - (int)AETHER_FONT_H) / 2;
+    if (gy < y) gy = y;
+    if (cp >= 0x80) draw_cjk(x, gy, cp, rgb);
+    else            draw_ascii(x, gy, (unsigned char)cp, rgb);
+#endif
+}
+
+void aether_draw_text_utf8_sized(int x, int y, const char *s, int size, unsigned rgb)
+{
+    if (size < 1) size = TK_T_COMPAT;
+    int lh = aether_text_line_h(size);
+    int cx = x;
+    unsigned cp;
+    const char *p = s;
+    while (utf8_next(&p, &cp)) {
+        int cw = sized_cell_w(cp, size);
+        draw_cell_sized(cx, y, cp, cw, size, lh, rgb);
+        cx += cw;
+    }
+}
+
+/* 单行截断（分册 §5.5）：按 UTF-8 字符粒度累加，禁止按字节截断产生半个汉字；
+ * 尾部省略号 U+2026 本身占 1em，需提前预留。禁止用 clip 代替省略号。 */
+void aether_text_fit_sized(char *dst, size_t cap, const char *src, int size, int maxpx)
+{
+    static const char ELL[] = "\xE2\x80\xA6";   /* … */
+    int ellw = sized_cell_w(0x2026, size);
+    int budget = maxpx - ellw;
+    if (budget < 0) budget = 0;
+    size_t o = 0;
+    int w = 0, truncated = 0;
+    const char *p = src;
+    while (*p) {
+        const char *q = p;
+        unsigned cp;
+        if (!utf8_next(&q, &cp)) break;
+        int n = (int)(q - p);
+        int cw = sized_cell_w(cp, size);
+        if (w + cw > maxpx || o + (size_t)n + 1 >= cap) { truncated = 1; break; }
+        memcpy(dst + o, p, (size_t)n);
+        o += (size_t)n; w += cw; p = q;
+    }
+    if (truncated) {
+        o = 0; w = 0; p = src;
+        while (*p) {
+            const char *q = p;
+            unsigned cp;
+            if (!utf8_next(&q, &cp)) break;
+            int n = (int)(q - p);
+            int cw = sized_cell_w(cp, size);
+            if (w + cw > budget || o + (size_t)n + sizeof(ELL) >= cap) break;
+            memcpy(dst + o, p, (size_t)n);
+            o += (size_t)n; w += cw; p = q;
+        }
+        memcpy(dst + o, ELL, sizeof(ELL) - 1);
+        o += sizeof(ELL) - 1;
+    }
+    dst[o] = 0;
+}
+
+/* 盒内排版：水平居中 + 按真实字体度量垂直居中 + 尾部省略号。
+ * 按钮、标题栏、状态栏等一律走此入口，业务层不再出现裸字号与固定 16。 */
+void aether_draw_text_utf8_box(int x, int y, int w, int h,
+                               const char *s, int size, unsigned rgb)
+{
+    if (w <= 0 || h <= 0) return;
+    char buf[256];
+    aether_text_fit_sized(buf, sizeof buf, s, size, w);
+    int tw = aether_text_width_utf8_sized(buf, size);
+    int tx = x + (w - tw) / 2;
+    int ty = aether_text_box_y(y, h, size);
+    aether_draw_text_utf8_sized(tx, ty, buf, size, rgb);
+}
+
 /* ---- 系统图标（Tux，内嵌位图，来源 gilbarbara/logos） ---- */
 void aether_draw_logo(int cx, int cy, int size)
 {
@@ -398,7 +573,7 @@ void aether_draw_logo(int cx, int cy, int size)
     }
 }
 
-/* PC 方案已废弃：鼠标指针位图与 aether_draw_cursor() 整体移除。
+/* PC 方案已废弃：鼠标指针位图与对应的指针绘制函数整体移除。
  * 本系统只支持触摸输入与触控手势，界面内不出现任何指针。 */
 
 /* ==================== 画布快照 / 位块传送 ====================

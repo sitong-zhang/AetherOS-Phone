@@ -101,6 +101,20 @@ static int cache_fill(struct aether_glyph *g, unsigned cp, int px_h)
 
 int aether_vfont_ready(void) { return vfont_init(); }
 
+int aether_vfont_metrics(int size, int *asc, int *desc)
+{
+    if (!vfont_init()) return 0;
+    if (size < 1) size = 1;
+    float scale = stbtt_ScaleForPixelHeight(&g_font, (float)size);
+    int a = (int)(g_asc * scale + 0.5f);
+    int d = (int)(-g_desc * scale + 0.5f);
+    if (a < 1) a = 1;
+    if (d < 0) d = 0;
+    if (asc)  *asc = a;
+    if (desc) *desc = d;
+    return 1;
+}
+
 const struct aether_glyph *aether_vfont_get(unsigned cp, int px_h)
 {
     if (!vfont_init() || cp == 0) return NULL;

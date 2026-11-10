@@ -35,4 +35,10 @@ int aether_vfont_ready(void);
  * 返回 NULL 表示该码点无字形（调用方可回退 '?'）。 */
 const struct aether_glyph *aether_vfont_get(unsigned cp, int px_h);
 
+/* 取指定字号下的真实字体度量（分册 §5.3 基线公式的唯一来源）。
+ * asc：行盒顶到基线的像素数；desc：基线到行盒底的像素数（正值）。
+ * 二者相加约等于 size，供渲染层计算 baseline = y + (line_h-(asc+desc))/2 + asc。
+ * 成功返回 1；字体不可用时返回 0，调用方按 8x16 点阵度量兜底。 */
+int aether_vfont_metrics(int size, int *asc, int *desc);
+
 #endif /* AETHER_VFONT_H */

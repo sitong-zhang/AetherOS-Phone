@@ -52,7 +52,7 @@ $CC $FLAGS -o "$OUT/sbin/aether-compositor" \
     "$SRC/aether-compositor.c" "$SRC/aether-display.c" \
     "$SRC/aether-android-bridge.c" \
     "$SRC/aether-android-util.c" \
-    "$SRC/aether-render.c" "$SRC/aether-anim.c" "$SRC/aether-glass.c" "$SRC/aether-icons.c" "$SRC/$SHELL_SRC" "$SRC/aether-ui.c" \
+    "$SRC/aether-render.c" "$SRC/aether-anim.c" "$SRC/aether-glass.c" "$SRC/aether-material.c" "$SRC/aether-icons.c" "$SRC/$SHELL_SRC" "$SRC/aether-ui.c" \
     "$SRC/aether-apps.c" "$SRC/aether-apps2.c" "$SRC/aether-settings.c" \
     "$SRC/aether-island.c" "$SRC/aether-discover.c" "$SRC/aether-store.c" "$SRC/aether-notes.c" "$SRC/aether-log.c" \
     $VFONT_DEF $VFONT_SRC $VFONT_OBJ -Wl,-z,noexecstack -lm
