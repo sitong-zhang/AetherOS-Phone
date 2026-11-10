@@ -31,7 +31,9 @@ sleep 1
 
 echo "=== [5/5] 用自研虚拟机真实开机并判定闭环 ==="
 set +e
-$R/host/aether-vm "$RUN/vm.conf" 150
+# 取证帧从 51 增至 87 后单轮耗时变长，就绪等待相应放宽；
+# 闭环判定条件（watchdog / 异常退出 / SELFTEST_DONE）不变。
+$R/host/aether-vm "$RUN/vm.conf" 300
 VMRC=$?
 set -e
 
