@@ -1,42 +1,115 @@
-# AetherOS Phone
+# AetherOS
 
-AetherOS 是一个从零构建的 ARM64 Linux 手机操作系统：**Linux 6.6.70 内核 + 完全自研用户态**，不含任何 AOSP 组件，不运行 ART；应用为静态链接的原生 ELF。
+AetherOS 是一套面向移动设备的操作系统：**Linux 内核 + 完全自研用户态**。自研范围包括
+init、系统服务、合成器、渲染管线、框架与界面；不基于 AOSP、不基于现成发行版。内核基于
+Linux、可裁剪、可配置，要求从源码构建。
 
-本仓库当前主线的交付形态是**自包含 Android APK**：APK 内置 QEMU 虚拟化引擎、客机内核镜像与系统盘（qcow2）。安装后点按一次开机即直接进入系统桌面，无需 root、无需解锁 bootloader、无需 Termux、无需 VNC 查看器、无需额外下载系统镜像。
+本项目的运行环境是**云电脑**，用软件模拟把整机真实跑起来：真实开机、真实出图、真实响应
+输入。系统本体**不是 Android 应用、不是 APK、不是虚拟机套壳预览包**。
 
-> 早期交付方式采用「Termux 中运行 QEMU + WebView/VNC 查看画面」，其源码与文档已停止维护并从本仓库移除。当前仓库仅包含自包含 APK 主线的源码与文档。
+系统**主打安全**。当前已跑通一套安全整机本体（`secure/`）：口令连续错误达到阈值即
+**抹除全部用户数据**（销毁密钥 + 多轮覆写 + 清除凭据），而**系统本体逐字节保留**；
+另有胁迫口令、防重启绕过计数、全盘静态加密、防篡改审计链、篡改即擦、紧急销毁等特性。
+设计与验收见 [`docs/SECURITY.md`](docs/SECURITY.md)。
+
+## 交付形态与双轨
+
+一套上层源码，两条验证轨道，证据分开记录、互不顶替（见 `docs/ARCHITECTURE.md`）：
+
+| 轨道 | 载体 | 只证明 | 不证明 |
+| --- | --- | --- | --- |
+| **A 轨 · 整机链路** | QEMU ARM64 + TCG 纯软件模拟，自建内核与根文件系统 | 引导 → 内核 → init → 服务 → 合成器首帧 → 注入输入改变画面 | 帧率、动效手感、长稳、并发 |
+| **B 轨 · 交互与像素** | 同一份上层源码 x86_64 原生构建，接口层接仿真实现 | 交互延迟、动画帧率、布局、对比度/遮挡/裁切、状态机、长稳 | 内核启动、真实驱动 |
+
+云电脑无 `/dev/kvm`，硬件虚拟化不可用，整机只能用 TCG 软件模拟。A 轨交互迟钝属于环境限制，
+不计入产品缺陷，因此体验类验收一律放在 B 轨。
+
+**兼容层**：AetherOS 主系统完全自研；对既有应用格式的兼容能力由系统内一个独立子系统提供，
+按容器化方式运行（可基于 AOSP / LineageOS / Waydroid 等开源实现）。兼容层内部运行的是
+第三方应用，这与「系统本体是 APK」是两件不同的事。
 
 ## 目录结构
 
-| 路径 | 内容 |
+| 路径 | 内容 | 状态 |
+| --- | --- | --- |
+| `guest/` | 复用的自研用户态上层：init、合成器、渲染/字体/图标、桌面与系统应用、参数源 `aether-tokens.h` | 可复用，正按接口层解耦 |
+| `secure/` | **安全整机本体**：密码学基座、四区隔离存储、认证引擎、加密保险库、自毁引擎、审计链、完整性、整机 CLI 与全套自测 | 已跑通（81/0 自测） |
+| `l2/` | **L2 硬件接口层**：十五域统一接口、仿真实现、接口自测 | 本阶段在建 |
+| `tools/` | 基线采集、机检门禁、检测器 | 本阶段在建 |
+| `scripts/` | 六种一键操作（构建/启动/关闭/重建/跑测/取证） | 本阶段在建 |
+| `docs/` | 环境基线、架构、阶段报告 | 本阶段在建 |
+| `evidence/` | 每轮演练的四件套证据 | 累积中 |
+| `vm/` | 历史 APK 套壳工程 | **已归档停用**，不再是交付形态，见 `vm/DEPRECATED.md` |
+
+## 当前状态（三档如实标注）
+
+> 阶段定义见 `docs/ARCHITECTURE.md`；状态只能由证据提升，未跑通一律写「部分实现 / 未开始」。
+
+| 阶段 | 目标 | 状态 |
+| --- | --- | --- |
+| S1 环境打通 | 一键起停重建、A 轨到首帧 | **部分实现**：基线已采集重填；内核与根文件系统尚未从源码自建 |
+| S2 接口层成型 | 十五域抽象 + 仿真实现 + 五门机检全过 | **部分实现**：接口层与自测在建 |
+| S3 整机闭环 | 引导到桌面全通 + 软键盘（含中文）可用 | **未开始**（软键盘为一票否决硬门） |
+| S4 能力补齐 | 全量模块清单无缺项、逐模块过像素断言 | **未开始** |
+| S5 稳定与性能 | 长稳、六类异常自动发现、性能可对比 | **未开始** |
+| S6 真机移植 | 换实现层上真机 / 树莓派 | **未开始** |
+
+**安全整机本体（`secure/`）已独立跑通**：81 项自测全绿、OpenSSL 密码学交叉验证 4/4 一致，
+完整演示「输错 3 次 → 抹除全部用户数据 → 系统完好可再用」并生成可离线校验的销毁证明。
+它是本机用户态软件模拟的安全子系统，与 S1–S6 的分阶段验收正交，**不替代**内核/图形桌面/
+软键盘等未开始项；证据见 `evidence/round-002/`，报告见 `docs/02-SECURE-REPORT.md`。
+
+已有的自研上层（`guest/`）此前在 QEMU TCG 上达成过连续帧变化与自检通过，但那属于
+**旧 APK 套壳口径**下的证据，不作为 v2 双轨验收证据，需按新口径重新取证。
+
+## 快速开始
+
+```bash
+# 采集环境基线（v2 §2.1 要求动手前先跑一次）
+python3 tools/collect_baseline.py
+
+# 六种一键，统一入口（详见 docs/ARCHITECTURE.md 与 scripts/）
+scripts/aether.sh build       # 从源码构建
+scripts/aether.sh start       # 拉起整机（A 轨）/ 原生上层（B 轨）
+scripts/aether.sh stop        # 正常关闭，清理进程/挂载/锁文件
+scripts/aether.sh rebuild     # 清干净重来
+scripts/aether.sh test        # 全套自测 + 五门机检，输出通过/失败清单
+scripts/aether.sh evidence    # 截帧、导出状态与日志
+
+# 安全整机：一键编译 + 81 项自测 + OpenSSL 交叉验证 + 整机演示 + 导出证据（含界面图）
+scripts/secure.sh all
+scripts/secure.sh shell       # 进入交互式整机 shell（init/unlock/put/panic/audit...）
+```
+
+不需要真实手机、真实外设或某家云厂商的私有接口；换一台云电脑也要能跑。
+
+## 工程约定
+
+- **参数单一源**：所有尺寸、间距、时长、圆角、阈值集中在 `guest/src/aether-tokens.h`；
+  业务代码不许出现裸数值，由机检脚本扫描。
+- **硬件访问只在 L2 及以下**：L3 以上源码不许出现 `/dev/`、`/sys/class/`、`/proc/` 直连，
+  由机检脚本判定。
+- **不自改门禁**：验收标准、门禁脚本、断言阈值不由执行方修改；每次改动留 diff 与回滚点。
+- **外部资产**：素材自带优先；必须外取的提供校验和与许可声明，缺失时显式报错而非静默降级。
+
+## 文档索引
+
+| 文档 | 内容 |
 | --- | --- |
-| `guest/` | 客机用户态源码：自研 init、软件合成器、渲染/字体/图标、阶段 1–5 业务层（桌面、灵动岛、应用商店、笔记、多任务、小窗、息屏显示），以及交叉编译与取证脚本 |
-| `vm/` | 自包含 APK 工程：Android Java/JNI 层、VM 运行时（QEMU 参数组装）、系统盘注入脚本、APK 打包脚本、真机闭环验证脚本 |
-| `docs/` | 架构说明、工程文档索引、开源归属与阶段进度文档 |
-
-## 启动链
-
-`BootActivity` → VM 运行时组装 QEMU 参数（`vm/core/`）→ 客机 Linux 6.6.70 内核 → `/sbin/aether-init` → `/etc/aether/run-compositor` → `/sbin/aether-compositor`（fbdev `/dev/fb0` 软件渲染）→ 锁屏 / 桌面。
-
-客机系统盘为 ext4 qcow2，由 `vm/make_system_v6.sh` 以 `debugfs` 注入生成。注入前必须先执行 `e2fsck -fy` 回放并清空 ext4 journal，注入后再做一致性复检；否则残留 journal 会在客机挂载时回滚大文件数据块，导致 exec 阶段崩溃。该问题曾导致 v6 真机启动失败，现已修复并在脚本中加入断言。
-
-## 当前状态（如实标注）
-
-- 版本 `1.0.16` / `versionCode 15`，包名 `dev.aether.vm`。
-- 主线已按《Aether OS 总规划书》推进至**阶段 5**：应用商店与安装/卸载闭环、笔记应用、多任务与最近任务、小窗、息屏显示（AOD）。阶段 6 完成全量复跑取证、系统盘注入与 APK 重打包。
-- 阶段 5 断言链已在 v6 系统盘上通过全系统 QEMU TCG 真机级闭环复跑：逐帧取证、`SELFTEST_STAGE5_DONE=1`、compositor 全程在线（fbdev 720×1280）、无崩溃与文件系统错误。验证入口 `vm/host/run_v6.sh`。
-- **矢量字体**：客机文字已从 16×16 点阵升级为内嵌 TrueType 矢量字体（`guest/assets/aether-font.ttf`，Noto Sans CJK SC 的 OFL 修改版子集，7720 码点），由 `stb_truetype` 做抗锯齿灰度栅格化。保持 8/16px 布局格不变，按基线换算修复了文字底部裁切；字体以 `objcopy` 静态链入合成器，不作为系统盘内的独立文件。许可证与采用理由见 [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md)。
-- **应用内更新**：APK 内置「系统更新」界面，读取公开 GitHub Releases latest 接口获取版本与资产摘要，下载后按 `sha256:` digest 校验，再经自研 `ContentProvider` 以 `content://` 交给系统安装器。入口位于系统诊断浮层与崩溃报告页。该模块只访问公开接口，不内置任何访问凭证。
-- **界面整改**：按用户指定的两个液态玻璃开源仓库（`Kyant0/AndroidLiquidGlass`、`sdegenaar/liquid_glass_widgets`）原样纳入源码快照、许可证与逐条对照表，修正此前参数错标与跨库混用；客机已整体移除 PC / 鼠标光标路径，界面内不绘制任何指针，输入只识别 `EV_ABS` + `BTN_TOUCH` 与键盘。桌面重建为「底层真实壁纸 + 上层磨砂玻璃遮罩」，搜索栏、小组件、Dock、状态栏、通知中心、控制中心、应用抽屉与最近任务均接入上游圆角、双层阴影、镜面高光、触控按压与转场时长规范；矢量字体已修复文字底部裁切。详见 [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md)。
-- **构建边界**：APK 打包依赖本机预置的外部资产（内核 Image、系统盘、SDL2/QEMU 动态库闭包、Android SDK/NDK），这些大二进制不纳入本仓库；仓库内暂未提供一键可复现的完整构建。后续工作项之一是把资产生成脚本化并接入 CI。
-- **交付渠道**：仅本 GitHub 仓库（源码与 GitHub Release）。独立公网发布页已废弃、不再维护。当前为内部调试阶段，系统尚未对外正式发布；Release 资产供应用内更新器读取。
-- 尚未完成：界面规范的全页面逐项审计（应用内页面、转场与阴影的逐页对照）、Android 兼容层（AVF / pKVM + LXC / AOSP）、真机下载安装与升级链路的端到端验证，以及总纲后续章节。
+| [`docs/00-BASELINE.md`](docs/00-BASELINE.md) | 本机实测环境基线、测量方法、与参考环境差异 |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 八层架构、双轨、十五域接口、机检门禁、阶段定义 |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | **安全系统设计**：威胁模型、四区隔离、自毁引擎、14 项特性、边界 |
+| [`docs/01-STAGE-REPORT.md`](docs/01-STAGE-REPORT.md) | 第一轮 S1/S2 地基阶段报告 |
+| [`docs/02-SECURE-REPORT.md`](docs/02-SECURE-REPORT.md) | 第二轮安全整机阶段报告（四件套 + 缺陷清单） |
+| [`docs/README.md`](docs/README.md) | 文档索引 |
+| [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md) | 图标与第三方资产归属、许可证、采用理由 |
 
 ## 开源归属
 
-- 图标与第三方资产归属、许可证与采用理由：[`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md)
-- 图标统一取自 Lucide（`lucide-static v0.468.0`，ISC），由 `guest/tools/gen_icons.py` 离线光栅化编入源码。
+- 图标统一取自 Lucide（`lucide-static v0.468.0`，ISC），离线光栅化编入源码，一套描边体系。
+- 矢量字体为 Noto Sans CJK SC 的 OFL 修改版子集，由 `stb_truetype` 栅格化。
+- 液态玻璃相关上游依赖与逐条对照见 `guest/OPENSOURCE-ATTRIBUTION.md` 与 `guest/THIRD_PARTY/`。
 
 ## 许可证
 
-见 [`LICENSE`](LICENSE)。
+见 [`LICENSE`](LICENSE)。第三方资产许可见上节归属文档。

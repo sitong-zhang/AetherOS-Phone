@@ -1,0 +1,426 @@
+{
+  "all_passed": false,
+  "gates": [
+    {
+      "hits": [
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 512,
+          "scope": "guest/src",
+          "text": "unsigned long tot = read_kv(\"/proc/meminfo\", \"MemTotal:\");"
+        },
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 513,
+          "scope": "guest/src",
+          "text": "unsigned long av  = read_kv(\"/proc/meminfo\", \"MemAvailable:\");"
+        },
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 516,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/version\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 519,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/uptime\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 521,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/loadavg\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 523,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/cpuinfo\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps.c",
+          "line": 574,
+          "scope": "guest/src",
+          "text": "snprintf(p, sizeof p, \"/proc/%s/comm\", de->d_name);"
+        },
+        {
+          "file": "guest/src/aether-apps2.c",
+          "line": 311,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/version\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps2.c",
+          "line": 314,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/cpuinfo\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps2.c",
+          "line": 327,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/meminfo\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps2.c",
+          "line": 338,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/uptime\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-apps2.c",
+          "line": 340,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/loadavg\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-compositor.c",
+          "line": 74,
+          "scope": "guest/src",
+          "text": "int con = open(\"/dev/console\", O_WRONLY);"
+        },
+        {
+          "file": "guest/src/aether-compositor.c",
+          "line": 102,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/stat\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-compositor.c",
+          "line": 124,
+          "scope": "guest/src",
+          "text": "f = fopen(\"/proc/meminfo\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-compositor.c",
+          "line": 172,
+          "scope": "guest/src",
+          "text": "snprintf(p, sizeof p, \"/dev/input/event%d\", i);"
+        },
+        {
+          "file": "guest/src/aether-discover.c",
+          "line": 464,
+          "scope": "guest/src",
+          "text": "FILE *uf = fopen(\"/proc/uptime\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-display.c",
+          "line": 61,
+          "scope": "guest/src",
+          "text": "int fd = open(\"/dev/fb0\", O_RDWR);"
+        },
+        {
+          "file": "guest/src/aether-display.c",
+          "line": 204,
+          "scope": "guest/src",
+          "text": "if (aether_drm_open(dr, \"/dev/dri/card0\", res) == 0) {"
+        },
+        {
+          "file": "guest/src/aether-display.c",
+          "line": 220,
+          "scope": "guest/src",
+          "text": "if (aether_drm_open(dr, \"/dev/dri/card0\", res) == 0) {"
+        },
+        {
+          "file": "guest/src/aether-display.c",
+          "line": 245,
+          "scope": "guest/src",
+          "text": "if (dr && aether_drm_open(dr, \"/dev/dri/card0\", res) == 0) {"
+        },
+        {
+          "file": "guest/src/aether-init.c",
+          "line": 68,
+          "scope": "guest/src",
+          "text": "int c = open(\"/dev/console\", O_RDWR);"
+        },
+        {
+          "file": "guest/src/aether-init.c",
+          "line": 88,
+          "scope": "guest/src",
+          "text": "mkdir(\"/dev/pts\", 0755);"
+        },
+        {
+          "file": "guest/src/aether-init.c",
+          "line": 89,
+          "scope": "guest/src",
+          "text": "mount_one(\"devpts\", \"/dev/pts\", \"devpts\");"
+        },
+        {
+          "file": "guest/src/aether-init.c",
+          "line": 200,
+          "scope": "guest/src",
+          "text": "int c = open(\"/dev/console\", O_RDWR);"
+        },
+        {
+          "file": "guest/src/aether-phone.c",
+          "line": 747,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/sys/class/power_supply/BAT0/capacity\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-phone.c",
+          "line": 748,
+          "scope": "guest/src",
+          "text": "if (!f) f = fopen(\"/sys/class/power_supply/BAT1/capacity\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 159,
+          "scope": "guest/src",
+          "text": "int c = read_int_path(\"/sys/class/power_supply/BAT0/capacity\", -1);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 160,
+          "scope": "guest/src",
+          "text": "if (c < 0) c = read_int_path(\"/sys/class/power_supply/BAT1/capacity\", -1);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 161,
+          "scope": "guest/src",
+          "text": "if (c < 0) c = read_int_path(\"/sys/class/power_supply/battery/capacity\", -1);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 236,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/net/dev\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 282,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/asound/cards\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 292,
+          "scope": "guest/src",
+          "text": "read_first_line(\"/sys/class/power_supply/BAT0/status\", b, sizeof b);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 293,
+          "scope": "guest/src",
+          "text": "if (!b[0]) read_first_line(\"/sys/class/power_supply/battery/status\", b, sizeof b);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 296,
+          "scope": "guest/src",
+          "text": "int temp = read_int_path(\"/sys/class/thermal/thermal_zone0/temp\", -1);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 300,
+          "scope": "guest/src",
+          "text": "read_first_line(\"/proc/uptime\", b, sizeof b);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 302,
+          "scope": "guest/src",
+          "text": "read_first_line(\"/proc/loadavg\", b, sizeof b);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 427,
+          "scope": "guest/src",
+          "text": "read_first_line(\"/proc/uptime\", b, sizeof b);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 453,
+          "scope": "guest/src",
+          "text": "if (read_first_line(\"/proc/version\", ver, sizeof ver)) {"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 490,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/cpuinfo\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 505,
+          "scope": "guest/src",
+          "text": "if (read_first_line(\"/proc/version\", ver, sizeof ver)) ver[80] = 0;"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 690,
+          "scope": "guest/src",
+          "text": "if (read_first_line(\"/proc/version\", v, sizeof v)) fprintf(f, \"内核: %s\\n\", v);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 691,
+          "scope": "guest/src",
+          "text": "if (read_first_line(\"/proc/uptime\", v, sizeof v)) fprintf(f, \"运行时间: %s\\n\", v);"
+        },
+        {
+          "file": "guest/src/aether-settings.c",
+          "line": 692,
+          "scope": "guest/src",
+          "text": "if (read_first_line(\"/proc/loadavg\", v, sizeof v)) fprintf(f, \"负载: %s\\n\", v);"
+        },
+        {
+          "file": "guest/src/aetherosd.c",
+          "line": 42,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/stat\", \"r\");"
+        },
+        {
+          "file": "guest/src/aetherosd.c",
+          "line": 78,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/meminfo\", \"r\");"
+        },
+        {
+          "file": "guest/src/aetherosd.c",
+          "line": 102,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/uptime\", \"r\");"
+        },
+        {
+          "file": "guest/src/aether-android.h",
+          "line": 37,
+          "scope": "guest/src",
+          "text": "#define AETHER_ANDROID_UINPUT   \"/dev/uinput\""
+        },
+        {
+          "file": "guest/src/aether-android.h",
+          "line": 38,
+          "scope": "guest/src",
+          "text": "#define AETHER_ANDROID_BINDERFS \"/dev/binderfs\""
+        },
+        {
+          "file": "guest/src/aether-android.c",
+          "line": 95,
+          "scope": "guest/src",
+          "text": "path_exists(\"/dev/binder\") || path_exists(\"/dev/binderfs/binder\")) ? 1 : 0;"
+        },
+        {
+          "file": "guest/src/aether-android.c",
+          "line": 96,
+          "scope": "guest/src",
+          "text": "c->fb0    = path_exists(\"/dev/fb0\") ? 1 : 0;"
+        },
+        {
+          "file": "guest/src/aether-android.c",
+          "line": 98,
+          "scope": "guest/src",
+          "text": "path_exists(\"/dev/input/uinput\")) ? 1 : 0;"
+        },
+        {
+          "file": "guest/src/aether-android.c",
+          "line": 146,
+          "scope": "guest/src",
+          "text": "if (path_exists(\"/dev/fb0\")) bind_dev(\"/dev/fb0\", \"dev/fb0\");"
+        },
+        {
+          "file": "guest/src/aether-android.c",
+          "line": 148,
+          "scope": "guest/src",
+          "text": "else if (path_exists(\"/dev/input/uinput\")) bind_dev(\"/dev/input/uinput\", \"dev/uinput\");"
+        },
+        {
+          "file": "guest/src/aether-android-bridge.c",
+          "line": 82,
+          "scope": "guest/src",
+          "text": "const char *paths[] = { AETHER_ANDROID_UINPUT, \"/dev/input/uinput\", NULL };"
+        },
+        {
+          "file": "guest/src/aether-android-util.c",
+          "line": 27,
+          "scope": "guest/src",
+          "text": "FILE *f = fopen(\"/proc/cmdline\", \"r\");"
+        }
+      ],
+      "known_debt": true,
+      "legacy_hits": 56,
+      "name": "1 无设备路径上浮",
+      "new_layer_hits": 0,
+      "note": "新建 L2 层零命中；guest/src 存量直连属 S2 待整改，命中即失败，不设豁免。",
+      "passed": false
+    },
+    {
+      "allowed": [
+        "aether_hal.h",
+        "aether_hal_config.h",
+        "stddef.h",
+        "stdint.h",
+        "stdio.h",
+        "stdlib.h",
+        "string.h"
+      ],
+      "name": "2 无跨层直调",
+      "passed": true,
+      "violations": []
+    },
+    {
+      "domain_count": 15,
+      "domains": [
+        "DISPLAY",
+        "INPUT",
+        "AUDIO",
+        "CAMERA",
+        "WIFI",
+        "BLUETOOTH",
+        "CELLULAR",
+        "LOCATION",
+        "SENSOR",
+        "BIOMETRIC",
+        "POWER",
+        "THERMAL",
+        "STORAGE",
+        "NETWORK",
+        "RTC"
+      ],
+      "name": "3 接口覆盖",
+      "passed": true,
+      "requirement": "15 域 + 能力查询/错误码/流控计数三件套符号齐备",
+      "triad": {
+        "aether_hal_caps": {
+          "declared": true,
+          "defined": true
+        },
+        "aether_hal_flow": {
+          "declared": true,
+          "defined": true
+        },
+        "aether_hal_last_error": {
+          "declared": true,
+          "defined": true
+        }
+      }
+    },
+    {
+      "hashes": {
+        "sim": "df05e0656298f11b2265891f18bc976d02a0f46c8fd0654b22cffc48e0d00a09",
+        "stub": "df05e0656298f11b2265891f18bc976d02a0f46c8fd0654b22cffc48e0d00a09"
+      },
+      "method": "同一上层 .c 编译两次（gcc -c，链接实现由 hal 运行期选择），比对目标文件 SHA-256",
+      "name": "4 实现可替换",
+      "passed": true
+    },
+    {
+      "l2_config_macros": 8,
+      "l2_duplicates": [],
+      "layout_token_duplicates": [],
+      "layout_tokens": 93,
+      "name": "5 单一参数源",
+      "passed": true,
+      "requirement": "配置常量与布局令牌各只有一个定义源；业务代码重复定义即失败"
+    }
+  ],
+  "governance": "规则固定；执行方不得修改阈值/期望值自证通过（§11.3）。",
+  "passed": 4,
+  "repo": ".",
+  "rules_version": "v2-5.6-1",
+  "schema": "aether.gate_l2/v1",
+  "total": 5
+}

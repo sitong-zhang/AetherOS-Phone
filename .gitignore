@@ -22,3 +22,7 @@ guest/aetheros-kernel-*.bzImage
 *.keystore
 .env
 *_token*
+
+# 取证证据例外：evidence/ 下的界面图与演示日志属于交付证据，允许入库
+!evidence/**/*.png
+!evidence/**/*.log

@@ -1,0 +1,14 @@
+[hal] wifi fault=FAULT
+[hal] wifi fault=DISCONNECTED
+[hal] wifi fault=NO_IMPL
+[hal] wifi fault=TIMEOUT
+[hal] wifi fault=TIMEOUT
+[hal] wifi fault=TIMEOUT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT
+[hal] bluetooth fault=FAULT

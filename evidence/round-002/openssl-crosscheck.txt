@@ -1,0 +1,5 @@
+== OpenSSL 3.x 独立复算（与 secure/tests/test_secure.c 内置标准向量比对）==
+SHA256(abc)              = ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad
+HMAC-SHA256(key,... )    = f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+PBKDF2-HMAC-SHA256(4096) = c5e478d59288c841aa530db6845c4c8d962893a001ce4e11a4963873aa98134a
+ChaCha20 keystream[:16]  = 10f1e7e4d13b5915500fdd1fa32071c4
