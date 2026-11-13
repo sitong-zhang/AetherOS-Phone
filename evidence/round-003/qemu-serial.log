@@ -1,0 +1,85 @@
+
+
++--------------------------------------------------------------+
+|  AetherOS 1.0.0  (Changming-Aether)                          |
+|  Self-developed kernel | x86_64 long mode | QEMU TCG          |
++--------------------------------------------------------------+
+POST PASS  multiboot handoff (0x2BADB002)
+POST PASS  IA-32e 64-bit long mode + 4-level paging
+POST PASS  physical memory manager (multiboot mmap)
+POST PASS  virtual memory manager (identity map)
+POST PASS  GDT / TSS / IDT / 8259 PIC
+POST PASS  ATA PIO block device (user data volume)
+POST PASS  SHA-256 standard vector (abc)
+POST PASS  PIT programmed (100 Hz), interrupts enabled (sti)
+POST PASS  timer tick advanced (interrupt live)
+POST INFO  BOOT OK: no credentials (factory state)
+POST PASS  no CPU exception during boot
+
+--- boot self-check summary: 0 failure(s) ---
+POST PASS  embedded initrd (ring3 ELF image present)
+ELF OK: entry=0x400000 phnum=2 user_range=0x400000..0x404120 stack=0x300000 -> entering ring3
+DIAG PTE(0x400000)=0x400067 P=1 RW=1 US=1
+
+=== AetherOS ring3 init :: SECURITY DEMO ===
+[1] boot magic via syscall: BOOT_MAGIC_OK (served by ring0 kernel)
+[2] kernel selftest:
+SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=3
+[3] factory provisioning (password + duress password):
+PROVISION_OK
+[4] unlock:
+OK: unlocked, vault ready
+UNLOCK_OK
+[5] store 3 encrypted files into vault (data volume):
+VAULT_PUT_OK x3
+VAULT: design.md(33) keys.bin(13) contacts.txt(21) [3 files]
+[6] read back design.md:
+VAULT_GET_OK
+[7] lock session:
+LOCK_OK
+[8] three wrong passwords (threshold triggers full data destruction):
+DENIED: wrong password (1/3)
+DENIED: wrong password (2/3)
+WIPED: 3 wrong passwords reached threshold 3 -> ALL user data destroyed, SYSTEM INTACT
+[9] wipe receipt + system integrity:
+WIPE_STATUS state=FACTORY fails=0 last_trigger=max-fails-reached last_fails=3 receipt=PRESENT
+{
+  "event": "AETHER_KERNEL_FULL_DATA_DESTRUCTION",
+  "trigger": "max-fails-reached",
+  "fails_at_trigger": 3,
+  "max_fails": 3,
+  "wipe_passes": 4,
+  "vault_sectors": 2048,
+  "volume_hash_before": "8a88ee27e6febdbc216521d93fcec4dab5b62ae01ad1c95615f6d5c55fc0f270",
+  "volume_hash_after": "30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58",
+  "volume_changed": true,
+  "sys_digest": "7d54b45a9ee5bf5e14cded83fe4724bb1987d07fde1ae2c27f6934aa8b460087",
+  "sys_unchanged": true,
+  "key_material": "DESTROYED",
+  "credentials": "PURGED",
+  "audit_seq": 12,
+  "result": "ALL_USER_DATA_DESTROYED_SYSTEM_INTACT"
+}
+WIPE_RECEIPT_OK sys_unchanged=true
+[10] re-provision after wipe (system survives, reusable):
+OK: unlocked, vault ready
+REINIT_OK
+[11] old data must be unrecoverable:
+OLD_DATA_GONE
+
+DEMO_DONE=1  ALL STAGES PASSED
+
+--- interactive shell ready (status/selftest/list/audit/help/exit) ---
+SHELL READY
+SHELL CMD: status
+AetherOS 1.0.0 (Changming-Aether) | kernel=ring0 | pages=128703/130943 | ticks=18 | faults=0
+SHELL CMD: selftest
+SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=53
+SHELL CMD: exit
+SHELL_EXIT
+
+=== KERNEL FINALIZE ===
+state=UNLOCKED fails=0 faults=0 ticks=88
+SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=88
+KERNEL_BOOT_FAILS=0 SELFTEST_DONE=1
+KERNEL_EXIT_CODE=0

@@ -1,0 +1,42 @@
+{
+  "passed": 8,
+  "failed": 0,
+  "results": [
+    {
+      "gate": "可构建 (-Werror, freestanding)",
+      "ok": true
+    },
+    {
+      "gate": "源码无硬编码归档绝对路径",
+      "ok": true
+    },
+    {
+      "gate": "密码学单测 0 FAIL",
+      "ok": true
+    },
+    {
+      "gate": "用户态 init 独立 ELF64 @ 用户基址",
+      "ok": true
+    },
+    {
+      "gate": "参数单一源 (aether_kconfig.h + 生成 boot_config.h)",
+      "ok": true
+    },
+    {
+      "gate": "常量集中定义于 aether_kconfig.h（不在 .c 散落）",
+      "ok": true
+    },
+    {
+      "gate": "源码树可复现哈希一致",
+      "ok": true
+    },
+    {
+      "gate": "Multiboot1 魔数 0x1BADB002 存在",
+      "ok": true
+    }
+  ],
+  "notes": [
+    "init.elf entry=0x400000 exec=True",
+    "kernel tree sha256=6fc12a96df4771aa..."
+  ]
+}
