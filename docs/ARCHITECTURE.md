@@ -36,9 +36,9 @@ Waydroid 等开源实现），与主系统自研不冲突。
 
 | 层 | 名称 | 职责 | 仓库落点 | 状态 |
 | --- | --- | --- | --- | --- |
-| L0 | 引导与固件 | 启动环境、镜像加载、校验、分区、失败回滚 | `boot/` | 部分实现 |
-| L1 | 内核 | 调度、内存、IPC、文件系统、网络、驱动框架、电源、安全、调试 | Linux 6.6.70（`boot/` 构建链路） | 部分实现 |
-| L2 | 接口层 HAL | 屏蔽硬件差异，向上提供统一能力接口 | `l2/` | 部分实现 |
+| L0 | 引导与固件 | 启动环境、镜像加载、校验、分区、失败回滚 | `boot/` | 冷启动链路已取证；镜像校验与失败回滚待接入 |
+| L1 | 内核 | 调度、内存、IPC、文件系统、网络、驱动框架、电源、安全、调试 | Linux 6.6.70（`boot/` 构建链路） | 从源码构建并实启；真机驱动与内核硬化待接入 |
+| L2 | 接口层 HAL | 屏蔽硬件差异，向上提供统一能力接口 | `l2/` | 已实现：十五域独立仿真 + 266 项自测；真机驱动替换待接入 |
 | L3 | 系统服务 | init、包管理、通知、媒体、音频、相机、位置、电话、网络、时间、更新、日志、电源 | `guest/src/aether-init.c`、`aetherosd.c` 等 | 部分实现 |
 | L4 | 图形与合成 | 显示管线、合成器、图层、帧调度、渲染原语、文字、图标、材质、转场 | `guest/src/aether-compositor.c`、`aether-render.c`、`aether-material.c` 等 | 部分实现 |
 | L5 | 框架与运行时 | 服务发现、应用生命周期、窗口、输入分发、资源、权限、运行时 | `guest/src/` 业务层 | 部分实现 |
@@ -116,19 +116,26 @@ Waydroid 等开源实现），与主系统自研不冲突。
 
 ## 八、启动链（A 轨）
 
+已取证的冷启动链路（QEMU aarch64 TCG）：
+
 ```
 QEMU aarch64 (-M virt, TCG)
-   → Linux 6.6.70 Image 引导
-   → 挂载自建 ext4 根文件系统
+   → Linux 6.6.70 Image 引导（从源码交叉编译）
+   → 挂载自建 ext4 根文件系统（virtio-blk /dev/vda）
    → 自研 PID 1 aether-init
-   → 服务编排（aetherosd / compositor / watchdog / bootdiag / selftest）
-   → virtio-gpu 输出首帧
-   → 注入输入改变画面
-   → 逐帧取证 + 开机门禁机检
+   → 服务编排（aetherosd / bootdiag）
+   → 开机诊断输出真实内核数据源（/proc/version、/proc/meminfo、/proc/uptime）
+   → 开机门禁逐环节断言串口证据
 ```
 
-内核与根文件系统从源码构建，或提供带校验和的获取脚本；构建脚本不依赖机器绝对路径或系统
-目录写权限。链路细节与一键用法见 [`../boot/README.md`](../boot/README.md)。
+图形首帧、注入输入改变画面与逐帧取证尚未在 A 轨取证，属后续阶段。用户态合成器当前以
+fbdev 路径构建，QEMU virt 未提供 `/dev/fb0`（诊断输出 `fb0=no`），因此不虚报首帧；
+交互与像素由 B 轨原生上层验证。
+
+构建入口为 `bash boot/build.sh`，冷启动取证为 `bash boot/run-qemu.sh`，门禁机检为
+`python3 tools/gate_boot.py`。内核与根文件系统从源码构建，外部资产由 `boot/ASSETS.sha256`
+校验；脚本不依赖机器绝对路径或系统目录写权限。链路细节见
+[`../boot/README.md`](../boot/README.md)。
 
 ## 九、真机路线
 

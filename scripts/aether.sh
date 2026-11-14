@@ -47,15 +47,10 @@ compile_l2() {
 # ---------- 前置资产检查（A 轨整机，如实报缺什么） ----------
 a_track_prereqs() {
     local missing=0
-    # 内核镜像、根文件系统：须从源码构建或提供带校验和的获取脚本
-    if ! find "$ROOT" -name 'Image' -o -name 'bzImage' -o -name 'kernel-android.img' 2>/dev/null | grep -q .; then
-        log "缺：内核镜像（未从源码构建，也无带校验和的获取脚本）"
-        missing=1
-    fi
-    if ! find "$ROOT" -name '*.qcow2' -o -name 'rootfs.ext4' -o -name 'system.img' 2>/dev/null | grep -q .; then
-        log "缺：根文件系统镜像（未自建）"
-        missing=1
-    fi
+    local img="$ROOT/build/aarch64/Image"
+    local fs="$ROOT/build/aarch64/rootfs.ext4"
+    [ -f "$img" ] || { log "缺：内核镜像 $img（执行 bash boot/build.sh 从源码构建）"; missing=1; }
+    [ -f "$fs" ]  || { log "缺：根文件系统 $fs（执行 bash boot/build.sh 自建）"; missing=1; }
     return $missing
 }
 
@@ -65,9 +60,9 @@ cmd_build() {
     # A 轨整机链路：如实检查前置，不假装能起
     log "检查 A 轨整机前置资产…"
     if a_track_prereqs; then
-        log "A 轨前置资产齐备（启动脚本接入中）"
+        log "A 轨前置资产齐备（启动：bash scripts/aether.sh start --track A）"
     else
-        log "A 轨整机当前【未就绪】：内核与根文件系统尚未从源码自建"
+        log "A 轨整机当前【未就绪】：执行 bash boot/build.sh 从源码构建内核与根文件系统"
     fi
     log "B 轨上层（x86 原生）已可构建；交互/像素验收待上层接入 L2 仿真实现后开展"
 }
@@ -80,9 +75,9 @@ cmd_start() {
         A|a)
             log "A 轨整机启动前置检查…"
             if ! a_track_prereqs; then
-                die "A 轨未就绪：缺内核镜像与根文件系统。需先完成 S1「从源码构建内核 + 自建根文件」，见 docs/ARCHITECTURE.md 第八节"
+                die "A 轨未就绪：缺少内核镜像或根文件系统，需先执行 bash boot/build.sh"
             fi
-            die "A 轨启动脚本尚未实现（S1 待办），不假装启动成功"
+            exec "$ROOT/boot/run-qemu.sh"
             ;;
         B|b)
             [ -x "$OUT/l2/test_hal" ] || compile_l2
@@ -170,7 +165,11 @@ cmd_status() {
     log "产物目录：$OUT"
     log "证据目录：$EVID"
     log "当前实现：$( [ -x "$OUT/l2/test_hal" ] && echo 'L2 已编译' || echo 'L2 未编译' )"
-    log "A 轨整机：未就绪（内核 + 根文件系统待自建，S1）"
+    if a_track_prereqs; then
+        log "A 轨整机：内核镜像与根文件系统齐备，可启动"
+    else
+        log "A 轨整机：未就绪（执行 bash boot/build.sh 构建）"
+    fi
     log "B 轨上层：接口层可跑；整机界面待接入 L2 仿真实现（S2）"
     log "第 1 门（无设备路径上浮）：FAIL（上层存量设备直连，详见机检输出）"
 }
@@ -186,12 +185,12 @@ case "${1:-}" in
     secure)   shift; exec "$ROOT/scripts/secure.sh" "$@" ;;
     *)
         cat <<EOF
-AetherOS 六种一键操作（v2 §2.2）
+AetherOS 六种一键操作
 
 用法: scripts/aether.sh <命令> [--track A|B]
 
-  build     从源码构建（当前：L2 接口层 + 自测；A 轨整机如实报缺什么）
-  start     拉起整机/原生上层：--track A（整机链路，未就绪）/ --track B（接口层 headless 冒烟）
+  build     构建 L2 接口层 + 自测，并核对 A 轨前置资产
+  start     拉起整机/原生上层：--track A（QEMU ARM64 整机链路）/ --track B（接口层 headless 冒烟）
   stop      正常关闭，清理进程/锁文件，检查挂载残留
   rebuild   清干净重来，产出可复现哈希
   test      全套自测 + 五门机检 + 基线采集，输出通过/失败清单
@@ -199,7 +198,12 @@ AetherOS 六种一键操作（v2 §2.2）
   status    当前状态（如实标注已实现/部分实现/未开始）
   secure    安全整机入口：build/test/demo/evidence/status/shell/all（转交 scripts/secure.sh）
 
-环境变量：AETHER_OUT（产物目录）、AETHER_EVIDENCE（证据目录）、CC
+A 轨整机链路独立入口：
+  bash boot/build.sh          从源码构建 Linux 6.6.70 ARM64 内核 + aarch64 用户态 + ext4 根盘
+  bash boot/run-qemu.sh       QEMU TCG 冷启动并输出串口取证
+  python3 tools/gate_boot.py  开机门禁机检
+
+环境变量：AETHER_OUT、AETHER_EVIDENCE、AETHER_BUILD、CC、JOBS、BOOT_TIMEOUT
 EOF
         [ -n "${1:-}" ] && die "未知命令：$1" || exit 0
         ;;

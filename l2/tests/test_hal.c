@@ -255,6 +255,68 @@ static void test_bad_args(void)
     CHECK(strlen(aether_hal_dom_name(AETHER_DOM_RTC)) > 0, "域名可查");
 }
 
+/* 清空某域残留队列与待投递事件，保证后续断言只观测本次注入 */
+static void drain_dom(aether_dom_t d)
+{
+    for (uint32_t i = 0; i < AETHER_HAL_QUEUE_CAP * 2 + 8; i++) {
+        aether_event_t out;
+        if (aether_hal_poll(d, &out) != AETHER_OK) break;
+        if (out.size == 0) break;
+    }
+}
+
+/* --- 用例 10：十五域逐一具备独立实现（复检 N5 验收） ---
+ * 可观测判据：能力位按域分化；域实例标识可回读；域级故障注入后
+ * 必须产出「携带该域编号」的关键事件。三者在十五域上逐一成立。 */
+static void test_dom_implementations(void)
+{
+    int realtime = 0, keycaps = 0;
+
+    for (int i = 0; i < AETHER_DOM_COUNT; i++) {
+        aether_dom_t d = (aether_dom_t)i;
+        const char *name = aether_hal_dom_name(d);
+        aether_caps_t c;
+        test_state_t st;
+
+        drain_dom(d);
+
+        /* 1) 能力位按域分化，且三件套齐备 */
+        CHECK(aether_hal_caps(d, &c) == AETHER_OK, "%s caps", name);
+        if (c.flags & AETHER_CAP_REALTIME) realtime++;
+        if (c.flags & AETHER_CAP_KEY_EVENTS) keycaps++;
+
+        /* 2) 域级故障注入 */
+        memset(&st, 0, sizeof st);
+        st.mode = AETHER_HAL_DOM_FAULT_MODE;
+        CHECK(aether_hal_set_state(d, &st, sizeof st) == AETHER_OK,
+              "%s 域级故障注入", name);
+
+        /* 3) 注入后域实例标识可回读 */
+        test_state_t back;
+        memset(&back, 0, sizeof back);
+        CHECK(aether_hal_get_state(d, &back, sizeof back) == AETHER_OK,
+              "%s get_state", name);
+        CHECK(back.aux == (uint32_t)i, "%s 域实例标识 aux=%u expect %d",
+              name, back.aux, i);
+
+        /* 4) 关键事件码携带域编号 */
+        int found = 0;
+        for (int k = 0; k < 6; k++) {
+            aether_event_t out;
+            if (aether_hal_poll(d, &out) != AETHER_OK) break;
+            if (out.flags & AETHER_EVT_KEY) {
+                uint32_t code = 0;
+                memcpy(&code, out.payload, sizeof code);
+                if ((code & 0xFFFF0000u) ==
+                    (AETHER_HAL_DOM_KEY_BASE | ((uint32_t)i << 16))) found = 1;
+            }
+        }
+        CHECK(found == 1, "%s 域级故障注入未产出带域编号的关键事件", name);
+    }
+    CHECK(realtime >= 3, "REALTIME 域数=%d，应至少 3", realtime);
+    CHECK(keycaps >= 4, "KEY_EVENTS 域数=%d，应至少 4", keycaps);
+}
+
 int main(void)
 {
     printf("=== AetherOS L2 接口层自测 (§5.4) ===\n");
@@ -274,6 +336,7 @@ int main(void)
     test_impl_switch();
     test_log_rate_limit();
     test_bad_args();
+    test_dom_implementations();
 
     aether_hal_fini();
     printf("\n=== 结果: PASS=%d FAIL=%d ===\n", g_pass, g_fail);

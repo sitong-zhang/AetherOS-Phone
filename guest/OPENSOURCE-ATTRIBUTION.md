@@ -52,6 +52,16 @@ AGSL / GLSL 源码因此不参与产品二进制编译，仅作为规格与许�
 | TrueType 栅格化 | `stb_truetype.h` | Public Domain / MIT | `guest/src/aether-vfont.c` |
 | 品牌标识 | 自绘矢量 | 自有 | `guest/assets/` |
 
+### 整机引导链路资产
+
+| 资产 | 来源 | 许可证 | 落地位置 |
+|---|---|---|---|
+| Linux 内核 | Linux 6.6.70 源码 | GPL-2.0 | `boot/kernel-6.6.70.config` 与 `boot/build.sh` 从源码交叉编译；源码 tarball 不随仓库分发，由 `boot/fetch-assets.sh` 按 `boot/ASSETS.sha256` 校验下载，产物落在 `build/` |
+| aarch64 BusyBox 静态基座 | BusyBox v1.36.1，静态交叉编译产物 | GPL-2.0 | `boot/assets/busybox-aarch64`，校验和见 `boot/ASSETS.sha256`；上游源码可从 [busybox.net](https://busybox.net/downloads/) 获取对应版本 |
+
+BusyBox 二进制随仓库分发，依据 GPL-2.0 提供上游源码获取地址；该基座仅作为根文件系统的
+命令行工具集，不参与 AetherOS 自研用户态逻辑。
+
 ### 安卓兼容层
 
 | 上游 | 许可证 | 落地位置 |

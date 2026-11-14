@@ -48,6 +48,9 @@ TRIAD_SYMBOLS = [
 ]
 DOMAIN_ENUM_RE = re.compile(r"AETHER_DOM_(\w+)")
 
+# 第 3 门：十五域仿真实现语义表逐项覆盖（每个域必须有独立实现条目）
+SIM_SEM_RE = re.compile(r"\[AETHER_DOM_(\w+)\]\s*=")
+
 
 def strip_c_comments(text):
     """去掉 C 的 /* */ 与 // 注释，保留字符串字面量内容。"""
@@ -149,8 +152,10 @@ def gate2_cross_layer(repo):
 def gate3_interface_coverage(repo):
     hdr = os.path.join(repo, 'l2', 'include', 'aether_dev_hal.h')
     core = os.path.join(repo, 'l2', 'sim', 'aether_hal_core.c')
+    sim = os.path.join(repo, 'l2', 'sim', 'aether_impl_sim.c')
     htext = read(hdr) if os.path.exists(hdr) else ''
     ctext = read(core) if os.path.exists(core) else ''
+    stext = read(sim) if os.path.exists(sim) else ''
 
     enums = [m for m in DOMAIN_ENUM_RE.findall(htext) if m != 'COUNT']
     # 去重保持顺序
@@ -165,14 +170,24 @@ def gate3_interface_coverage(repo):
         defined = re.search(r'\b' + re.escape(s) + r'\s*\(', ctext) is not None
         triad[s] = {"declared": declared, "defined": defined}
 
-    passed = len(domains) == 15 and all(v['declared'] and v['defined'] for v in triad.values())
+    # 仿真实现必须为 15 个域各提供一条语义表项，缺一即判定「实现覆盖不足」
+    sem_seen, impl_domains = set(), []
+    for e in SIM_SEM_RE.findall(stext):
+        if e != 'COUNT' and e not in sem_seen:
+            sem_seen.add(e); impl_domains.append(e)
+    impl_ok = len(impl_domains) == 15 and set(impl_domains) == set(domains)
+
+    passed = (len(domains) == 15 and impl_ok
+              and all(v['declared'] and v['defined'] for v in triad.values()))
     return {
         "name": "3 接口覆盖",
         "passed": passed,
         "domain_count": len(domains),
         "domains": domains,
+        "impl_domain_count": len(impl_domains),
+        "impl_domains": impl_domains,
         "triad": triad,
-        "requirement": "15 域 + 能力查询/错误码/流控计数三件套符号齐备",
+        "requirement": "15 域 + 三件套符号齐备 + 仿真实现 15 域语义表逐项覆盖",
     }
 
 
@@ -259,7 +274,8 @@ def human_report(d):
         elif g['name'].startswith('2'):
             key = f"越界 include {len(g['violations'])} 处"
         elif g['name'].startswith('3'):
-            key = f"域 {g['domain_count']}/15，三件套 {sum(1 for v in g['triad'].values() if v['defined'])}/3"
+            key = (f"域 {g['domain_count']}/15，实现 {g['impl_domain_count']}/15，"
+                   f"三件套 {sum(1 for v in g['triad'].values() if v['defined'])}/3")
         elif g['name'].startswith('4'):
             key = "两次编译哈希一致" if g['passed'] else g.get('error', '哈希不一致')
         else:

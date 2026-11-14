@@ -1,0 +1,5 @@
+# AetherOS A 轨外部资产 SHA-256 校验清单
+# 格式：<hash>  <name>；校验脚本 boot/fetch-assets.sh 按此清单核对。
+# 内核源码 tarball 不随仓库分发，由获取脚本按清单校验后下载。
+84d23ee07fb26febbcb6d1295ba15efdc67ac382b4137b2c8853146c10fd2f97  linux-6.6.70.tar.xz
+a18dac68da6c1fb8644ee06ee0383b5ba988abb6ecc01bfd0bbef3f6ac507676  boot/assets/busybox-aarch64

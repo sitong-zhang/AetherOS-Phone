@@ -31,6 +31,14 @@
 /* 基带状态机可注入的状态数量（无卡/无信号/漫游/仅紧急/注册失败/已注册）。 */
 #define AETHER_HAL_CELL_STATES     6u
 
+/* 域级故障注入标记：向任一域注入该 mode，实现必须上报带域标识的关键事件。
+ * 十五域逐一可复现，用于验证「每个域都有独立实现」而非共用空壳。 */
+#define AETHER_HAL_DOM_FAULT_MODE  0xA5A5A5A5u
+
+/* 关键事件码格式：0xD0XXYYYY。XX 为域编号，YYYY 为域内原因码。
+ * 上层可从事件码直接判定事件来源域，无需读取实现内部状态。 */
+#define AETHER_HAL_DOM_KEY_BASE    0xD0000000u
+
 /* 传感器降频上报的最小步进（采样率下调时必须上报，不许悄悄变低）。 */
 #define AETHER_HAL_SENSOR_RATE_MIN 1u
 

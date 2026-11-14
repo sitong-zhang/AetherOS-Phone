@@ -1,0 +1,4 @@
+name=bootdiag
+exec=/etc/aether/bootdiag.sh
+depends=aetherosd
+restart=never
