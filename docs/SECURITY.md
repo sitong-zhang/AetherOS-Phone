@@ -171,7 +171,7 @@ vault.img = "AEVL" ‖ blob_len ‖ ae_seal(DEK, 文件表) ‖ 0填充
 ## 10. 运行与验收
 
 ```bash
-scripts/secure.sh all          # 编译 → 81 项自测 + OpenSSL 交叉验证 → 整机演示 → 导出证据
+scripts/secure.sh all          # 编译 → 252 项自测 + OpenSSL 交叉验证 → 整机演示 → 导出证据
 scripts/secure.sh shell        # 进入交互式整机 shell（可 --root / --max-fails / --no-delay）
 scripts/aether.sh secure all   # 从统一入口转发
 ```

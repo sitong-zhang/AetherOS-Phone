@@ -4,13 +4,25 @@
  * 三档语义严格分开：
  *   常规档(ae_secure_wipe)  : 抹 data/ 用户数据，sys/ 系统本体逐字节保留。
  *   胁迫档(duress)          : 诱饵环境（既有 secure 能力）。
- *   熔断档(ae_ld_brick)     : 抹除包括 sys/ 在内的所有区，报警，永久变砖。
+ *   熔断档(ae_ld_brick)     : 抹除包括 sys/ 在内的所有区 + 报警 + 软件熔断标记
+ *                             + 烧毁硬件指令(硬件熔断)。
+ *
+ * 熔断触发判据（用户 2026-11-14 澄清 + 评估报告 §4.3/§4.5）：
+ *   **事件只作证据，行为/攻击意图才触发**——不是「插 USB / 开盖 / 碰测试点就删」。
+ *   L1 无害   → 记录取证、零删除、保持锁定；
+ *   L2 可疑   → 断连+取证累计、进 SUSPECT、零删除；
+ *   L3 攻击意图(USB破解强插/短接触及核心区/核心区导出/密钥区触碰) → 立即熔断；
+ *   维修白名单 → 豁免物理开盖/短接，不豁免 L3 核心区导出（防伪造凭证）。
+ *
+ * 软件熔断 vs 硬件熔断（报告 §4.3 建议 2，分开命名/验收）：
+ *   软件熔断 = 删全部分区 + BRICKED 标记 + 引导级拦截 → 系统不可恢复，刷机可重装；
+ *   硬件熔断 = ae_hal_hw_fuse_burn → 真机 eFuse/OTP/crowbar 物理永久变砖，
+ *              云端仅仿真指令锁存（ae_hal_hw_fuse_backend 如实返回 simulated）。
  *
  * 「零存储」精确语义：密码本身永不落盘。落盘于 lockdown/ 区的只有一个
  *   verifier = HMAC(device_key, PBKDF2(pw, salt)) —— 由密码单向派生、无法
  *   倒推回密码，且绑定设备密钥。密码明文只在 begin() 的调用栈内瞬时用于
  *   强度校验 / 弹窗回显 / 派生，调用返回后不驻留内存、不写任何文件。
- *   验证时用候选密码重算 verifier 做常量时间比对。
  */
 #define _GNU_SOURCE
 #include "aether_lockdown.h"
@@ -24,7 +36,7 @@
 #include <sys/stat.h>
 
 #define ANCHOR_MAGIC   "AETHLD01"        /* 8B */
-#define MODE_FILE      "lockdown.mode"   /* LOCKED 状态持久标记 */
+#define MODE_FILE      "lockdown.mode"   /* LOCKED / SUSPECT 状态持久标记 */
 #define ANCHOR_HDR     (8u + AE_SALT_LEN)              /* magic + salt */
 #define ANCHOR_BODY    (ANCHOR_HDR + AE_SHA256_LEN)    /* + verifier */
 #define ANCHOR_LEN     (ANCHOR_BODY + AE_SHA256_LEN)   /* + mac */
@@ -52,7 +64,8 @@ static const char *st_name(ae_ld_state_t s)
         case AE_LD_GESTURE: return "GESTURE(组合键计时中)";
         case AE_LD_ARMED:   return "ARMED(满10秒·待音量上确认)";
         case AE_LD_LOCKED:  return "LOCKED(安全锁定模式)";
-        case AE_LD_BRICKED: return "BRICKED(已熔断·永久变砖)";
+        case AE_LD_SUSPECT: return "SUSPECT(可疑·证据累计中·零删除)";
+        case AE_LD_BRICKED: return "BRICKED(软件熔断·系统不可恢复·刷机可重装)";
         default:            return "?";
     }
 }
@@ -62,8 +75,7 @@ static int is_lower(char c){ return c>='a'&&c<='z'; }
 static int is_digit(char c){ return c>='0'&&c<='9'; }
 static int is_special(char c){ return c>=33 && c<=126 && !is_upper(c) && !is_lower(c) && !is_digit(c); }
 
-/* 递增/递减连续序列（12345 / abcde / 98765 …）长度 > limit 即判弱。
- * 用户口径「123 连续的数字不能超过 5 个」：12345 允许，123456 拒绝。 */
+/* 递增/递减连续序列（12345 / abcde / 98765 …）长度 > limit 即判弱。 */
 static int has_long_run(const char *pw, int limit)
 {
     size_t i; int run = 1;
@@ -80,7 +92,6 @@ static int device_key(ae_store_t *s, uint8_t k[AE_KEY_LEN])
     return ae_tee_device_key(s, AE_TEE_SOFTWARE, k);  /* 当前软件锚点 */
 }
 
-/* 从密码派生不可倒推的验证锚。pw 只在调用栈内使用。 */
 static int make_verifier(ae_store_t *s, const char *pw,
                          const uint8_t salt[AE_SALT_LEN], uint8_t out[AE_SHA256_LEN])
 {
@@ -92,8 +103,7 @@ static int make_verifier(ae_store_t *s, const char *pw,
     return 0;
 }
 
-/* anchor = magic(8) | salt(16) | verifier(32) | mac(32)
- * mac = HMAC(device_key, magic|salt|verifier) 防篡改 */
+/* anchor = magic(8) | salt(16) | verifier(32) | mac(32) */
 static void anchor_mac(ae_store_t *s, uint8_t a[ANCHOR_LEN])
 {
     uint8_t dk[AE_KEY_LEN];
@@ -114,6 +124,39 @@ static int anchor_ok(ae_store_t *s, const uint8_t a[ANCHOR_LEN])
     return ok;
 }
 
+/* ------------------------------------------------ 证据链（只追加，外部可观测） */
+static void evidence_append(ae_ld_t *c, ae_hal_event_t ev, ae_threat_t th)
+{
+    if (!c) return;
+    uint8_t *b = NULL; size_t n = 0;
+    char buf[8192]; size_t used = 0;
+    if (ae_store_read(c->store, AE_ZONE_LOCKDOWN, AE_LD_EVID_FILE, &b, &n) == 0) {
+        if (n < sizeof buf - 256) { memcpy(buf, b, n); used = n; }
+        free(b);
+    }
+    int w = snprintf(buf + used, sizeof buf - used, "%s|%s|%s\n",
+                     ae_hal_event_name(ev), ae_hal_threat_name(th),
+                     ae_hal_backend_name(c->hal));
+    if (w > 0) used += (size_t)w;
+    (void)ae_store_atomic_write(c->store, AE_ZONE_LOCKDOWN, AE_LD_EVID_FILE, buf, used);
+    ae_hal_record_evidence(c->hal, ev);   /* 进程内即时计数 */
+}
+static uint32_t evidence_file_lines(ae_ld_t *c)
+{
+    if (!c) return 0;
+    uint8_t *b = NULL; size_t n = 0; uint32_t lines = 0;
+    if (ae_store_read(c->store, AE_ZONE_LOCKDOWN, AE_LD_EVID_FILE, &b, &n) == 0) {
+        for (size_t i = 0; i < n; i++) if (b[i] == '\n') lines++;
+        free(b);
+    }
+    return lines;
+}
+static const char *evidence_file_last(ae_ld_t *c)
+{
+    /* 返回 HAL 进程内的最后事件名；跨进程取证请直接读 evidence.log 末行 */
+    return c ? ae_hal_evidence_last(c->hal) : "";
+}
+
 /* ------------------------------------------------------------ 生命周期/状态 */
 int ae_ld_open(ae_store_t *s, ae_hal_t *hal, ae_ld_t **out)
 {
@@ -127,12 +170,14 @@ int ae_ld_open(ae_store_t *s, ae_hal_t *hal, ae_ld_t **out)
         c->state = AE_LD_BRICKED;
     } else {
         uint8_t *b = NULL; size_t n = 0;
-        int locked = 0;
+        int locked = 0, suspect = 0;
         if (ae_store_read(s, AE_ZONE_LOCKDOWN, MODE_FILE, &b, &n) == 0) {
-            locked = (n >= 6 && memcmp(b, "LOCKED", 6) == 0);
+            locked  = (n >= 6 && memcmp(b, AE_LD_MODE_LOCKED, 6) == 0);
+            suspect = (n >= 7 && memcmp(b, AE_LD_MODE_SUSPECT, 7) == 0);
             free(b);
         }
-        if (locked) c->state = AE_LD_LOCKED;
+        if (locked)       c->state = AE_LD_LOCKED;
+        else if (suspect) c->state = AE_LD_SUSPECT;
         else if (ae_store_exists(s, AE_ZONE_LOCKDOWN, AE_LD_ANCHOR_FILE)) c->state = AE_LD_NORMAL;
         else c->state = AE_LD_UNSET;
     }
@@ -156,7 +201,7 @@ int ae_ld_is_provisioned(ae_ld_t *c)
 }
 int ae_ld_oobe_gate(ae_ld_t *c)
 {
-    /* 未设定 或 已变砖：不放行进入系统 */
+    /* 未设定 或 已软件熔断：不放行进入系统 */
     if (!c || c->state == AE_LD_BRICKED || c->state == AE_LD_UNSET) return 0;
     return ae_ld_is_provisioned(c) ? 1 : 0;
 }
@@ -195,7 +240,7 @@ int ae_ld_provision_begin(ae_ld_t *c, const char *pw,
     if (why && why_n) why[0] = 0;
     if (!c) return -2;
     if (c->state == AE_LD_BRICKED) {
-        if (why&&why_n) snprintf(why,why_n,"设备已变砖，无法设定");
+        if (why&&why_n) snprintf(why,why_n,"设备已软件熔断，无法设定");
         return -2;
     }
     if (ae_ld_is_provisioned(c)) {
@@ -205,7 +250,6 @@ int ae_ld_provision_begin(ae_ld_t *c, const char *pw,
     int rc = ae_ld_check_strength(pw, why, why_n);
     if (rc != 0) return -1;
 
-    /* 构造验证锚（不含密码明文），留在内存待确认，冷却通过后才落盘。 */
     memset(c->pending_anchor, 0, sizeof c->pending_anchor);
     memcpy(c->pending_anchor, ANCHOR_MAGIC, 8);
     uint8_t salt[AE_SALT_LEN];
@@ -222,13 +266,12 @@ int ae_ld_provision_begin(ae_ld_t *c, const char *pw,
     c->provisioning = 1;
     c->cooldown_begin_ms = ae_hal_now_ms(c->hal);
 
-    /* 二次确认弹窗文案：警告 + 明文回显(仅屏幕/缓冲，绝不落盘) + 冷却提示。 */
     if (dialog && dialog_n) {
         snprintf(dialog, dialog_n,
             "==== 安全锁定密码 · 二次确认 ====\n"
             "此密码不可重置、不可找回，仅首次设定有效。\n"
             "进入安全锁定模式后，除非输入此密码，任何方式都无法解锁；\n"
-            "一旦忘记，手机将永久变砖、无法使用（无任何恢复途径）。\n"
+            "一旦忘记，将无法退出安全锁定模式（无任何恢复途径）。\n"
             "请务必用【物理方式】抄录并离线保存：不要截图、不要存电子版、不要联网传输。\n"
             "本次设定的密码（再显示一遍，仅此一次）：\n"
             "    %s\n"
@@ -286,10 +329,10 @@ int ae_ld_unlock(ae_ld_t *c, const char *pw, char *msg, size_t n)
     if (msg && n) msg[0] = 0;
     if (!c) return -3;
     if (c->state == AE_LD_BRICKED) {
-        if (msg&&n) snprintf(msg,n,"设备已变砖：任何方式都无法退出/解锁");
+        if (msg&&n) snprintf(msg,n,"设备已软件熔断：任何方式都无法退出/解锁（刷机可重装）");
         return -3;
     }
-    if (c->state != AE_LD_LOCKED) {
+    if (c->state != AE_LD_LOCKED && c->state != AE_LD_SUSPECT) {
         if (msg&&n) snprintf(msg,n,"当前不在安全锁定模式");
         return -2;
     }
@@ -298,12 +341,13 @@ int ae_ld_unlock(ae_ld_t *c, const char *pw, char *msg, size_t n)
         return -1;
     }
     (void)ae_store_remove(c->store, AE_ZONE_LOCKDOWN, MODE_FILE);
+    ae_hal_set_service_mode(c->hal, 0);
     c->state = AE_LD_NORMAL;
     if (msg&&n) snprintf(msg,n,"安全密码正确：已退出安全锁定模式");
     return 0;
 }
 
-/* --------------------------------------------------------------- 熔断 */
+/* --------------------------------------------------- 熔断（软件 + 硬件） */
 int ae_ld_brick(ae_ld_t *c, const char *trigger, char *msg, size_t n)
 {
     if (msg && n) msg[0] = 0;
@@ -317,7 +361,6 @@ int ae_ld_brick(ae_ld_t *c, const char *trigger, char *msg, size_t n)
         if (names && ae_store_list(c->store, zones[z], names, 256, &count) == 0) {
             for (i = 0; i < count; i++) {
                 uint8_t *fb = NULL; size_t fl = 0;
-                /* 覆写后再删：尽力而为，检查返回值 */
                 if (ae_store_read(c->store, zones[z], names[i], &fb, &fl) == 0 && fl) {
                     uint8_t *ov = (uint8_t*)malloc(fl);
                     if (ov) {
@@ -334,43 +377,97 @@ int ae_ld_brick(ae_ld_t *c, const char *trigger, char *msg, size_t n)
         }
         free(names);
     }
-    /* 变砖墓碑：唯一残留，代表「连系统一并抹除、永久不可用」 */
+    /* 软件熔断墓碑：系统本体不可恢复（但刷机可重装，非硬件永久变砖） */
     char tomb[256];
-    snprintf(tomb, sizeof tomb, "AETHER_BRICKED trigger=%s\n", trigger ? trigger : "unspecified");
+    snprintf(tomb, sizeof tomb, "AETHER_SOFTWARE_BRICK trigger=%s\n", trigger ? trigger : "unspecified");
     (void)ae_store_atomic_write(c->store, AE_ZONE_LOCKDOWN, AE_LD_BRICK_FILE,
                                 tomb, strlen(tomb));
-    (void)ae_hal_alarm(c->hal, trigger ? trigger : "physical-intrusion");
+    /* 烧毁硬件（硬件熔断）：真机 eFuse/OTP/crowbar；云端仅仿真指令锁存 */
+    (void)ae_hal_hw_fuse_burn(c->hal, trigger ? trigger : "L3-attack");
+    /* 触发原因放最后一条报警，便于外部可观测断言 alarm_last */
+    (void)ae_hal_alarm(c->hal, trigger ? trigger : "L3-attack");
     c->state = AE_LD_BRICKED;
     if (msg && n) snprintf(msg, n,
-        "熔断：已抹除包括系统本体在内的 %d 个文件、触发报警、落变砖标记；设备永久不可用", removed);
+        "熔断：软件熔断抹除含系统本体的 %d 个文件 + 报警 + 烧毁硬件指令(%s)；系统不可恢复(刷机可重装)",
+        removed, ae_hal_hw_fuse_backend(c->hal));
     return 0;
 }
 
-/* -------------------------------------------------- 事件驱动状态机 */
+/* -------------------------------------------------- 事件驱动状态机（分级判据） */
 int ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
                    char *msg, size_t n)
 {
     if (msg && n) msg[0] = 0;
     if (!c) return 0;
 
-    /* 变砖终态：任何事件、任何方式都无效 */
+    /* 软件熔断终态：任何事件、任何方式都无效 */
     if (c->state == AE_LD_BRICKED) {
-        if (msg&&n) snprintf(msg,n,"设备已变砖：任何事件均无效");
+        if (msg&&n) snprintf(msg,n,"设备已软件熔断：任何事件均无效");
         return 0;
     }
-    /* 安全锁定态：仅专用密码可退（unlock 单独提供）；物理入侵 → 熔断 */
-    if (c->state == AE_LD_LOCKED) {
-        if (ev == AE_EV_USB_DATA || ev == AE_EV_CHASSIS_OPEN || ev == AE_EV_TESTPOINT_SHORT) {
-            const char *tr = ev == AE_EV_USB_DATA ? "usb-data-intrusion" :
-                             ev == AE_EV_CHASSIS_OPEN ? "chassis-open" : "testpoint-short";
-            char bm[256];
+
+    /* ============ LOCKED / SUSPECT：分级判据，事件只作证据 ============ */
+    if (c->state == AE_LD_LOCKED || c->state == AE_LD_SUSPECT) {
+        ae_threat_t th = ae_hal_event_threat(ev);
+
+        /* 官方维修白名单开启（签名凭证）：豁免物理开盖/短接，不豁免 L3 */
+        if (th == AE_THREAT_SERVICE) {
+            ae_hal_set_service_mode(c->hal, 1);
+            evidence_append(c, ev, th);
+            if (msg&&n) snprintf(msg,n,
+                "已启用官方维修白名单(%s)：豁免物理开盖/短接类信号，但不豁免 L3 核心区导出",
+                ae_hal_event_name(ev));
+            return 0;
+        }
+
+        int whitelisted = ae_hal_service_mode(c->hal);
+
+        /* L1 无害：记录取证 + 轻报警，零删除，保持锁定 */
+        if (th == AE_THREAT_L1) {
+            evidence_append(c, ev, th);
+            (void)ae_hal_alarm(c->hal, "L1-benign(record-only,zero-delete)");
+            if (msg&&n) snprintf(msg,n,
+                "L1 无害信号(%s)：仅记录取证、零删除，保持 %s%s",
+                ae_hal_event_name(ev), ae_ld_state_name(c),
+                whitelisted ? "（维修白名单）" : "");
+            return 0;
+        }
+
+        /* L2 可疑：维修白名单下只记录；否则断连+取证累计 → SUSPECT，零删除 */
+        if (th == AE_THREAT_L2) {
+            evidence_append(c, ev, th);
+            if (whitelisted) {
+                if (msg&&n) snprintf(msg,n,
+                    "维修白名单：可疑行为(%s)仅记录取证、不升级、零删除",
+                    ae_hal_event_name(ev));
+                return 0;
+            }
+            (void)ae_hal_alarm(c->hal, "L2-suspect(disconnect+forensics)");
+            c->state = AE_LD_SUSPECT;
+            (void)ae_store_atomic_write(c->store, AE_ZONE_LOCKDOWN, MODE_FILE,
+                                        AE_LD_MODE_SUSPECT, 7);
+            if (msg&&n) snprintf(msg,n,
+                "L2 可疑行为(%s)：断连+取证累计=%u、进入 SUSPECT、零删除",
+                ae_hal_event_name(ev), ae_ld_evidence_count(c));
+            return 0;
+        }
+
+        /* L3 确认攻击意图：立即摧毁系统 + 烧毁硬件（白名单也不豁免核心区导出） */
+        if (th == AE_THREAT_L3) {
+            evidence_append(c, ev, th);
+            const char *tr = ae_hal_event_name(ev);
+            char bm[320];
             (void)ae_ld_brick(c, tr, bm, sizeof bm);
-            if (msg&&n) snprintf(msg,n,"检测到物理破解(%s) → 报警 + 抹除数据及系统 → %s", tr, bm);
+            if (msg&&n) snprintf(msg,n,
+                "L3 确认攻击意图(%s) → 摧毁系统(软件熔断) + 烧毁硬件 → %s", tr, bm);
             return 1;   /* 已熔断 */
         }
+
+        /* 中性输入（组合键等）：安全锁定中忽略，仅专用密码可解 */
         if (msg&&n) snprintf(msg,n,"安全锁定中：仅专用密码可解锁，其余路径全部封死");
         return 0;
     }
+
     /* 未设密码：组合键完全无效（硬门） */
     if (c->state == AE_LD_UNSET) {
         if (msg&&n && (ev==AE_EV_KEY_POWER||ev==AE_EV_KEY_VOL_DOWN||ev==AE_EV_KEY_VOL_UP))
@@ -392,9 +489,8 @@ int ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
             return 0;
         }
         if (el >= AE_LD_GESTURE_MS) {
-            c->state = AE_LD_ARMED;   /* 超时保持待确认，不自动进入 */
+            c->state = AE_LD_ARMED;
             if (msg&&n) snprintf(msg,n,"同按已满 10 秒 → 待「音量上」确认（保持，不自动进入）");
-            /* 落到 ARMED 后继续处理本事件（若本事件即 VOL_UP 则立即进入） */
         } else {
             if (msg&&n) snprintf(msg,n,"组合键计时中（未满 10 秒）");
             return 0;
@@ -404,7 +500,8 @@ int ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
     if (c->state == AE_LD_ARMED) {
         if (ev == AE_EV_KEY_VOL_UP) {
             c->state = AE_LD_LOCKED; c->power_down = 0;
-            (void)ae_store_atomic_write(c->store, AE_ZONE_LOCKDOWN, MODE_FILE, "LOCKED", 6);
+            (void)ae_store_atomic_write(c->store, AE_ZONE_LOCKDOWN, MODE_FILE,
+                                        AE_LD_MODE_LOCKED, 6);
             if (msg&&n) snprintf(msg,n,"已进入【安全锁定模式】：仅专用密码可解锁，其余任何方式封死");
             return 0;
         }
@@ -431,7 +528,7 @@ int ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
     return 0;
 }
 
-/* --------------------------------------------- 外部可观测：零存储取证 */
+/* --------------------------------------------- 外部可观测：零存储取证 / 诊断 */
 static int file_contains(const char *path, const char *pw, size_t plen)
 {
     FILE *f = fopen(path, "rb");
@@ -439,7 +536,6 @@ static int file_contains(const char *path, const char *pw, size_t plen)
     uint8_t buf[4096]; size_t r, carry = 0;
     uint8_t tail[64]; int found = 0;
     while ((r = fread(buf, 1, sizeof buf, f)) > 0) {
-        /* 简易跨块匹配：把上一块尾部拼到前面 */
         uint8_t *scan = buf; size_t slen = r;
         uint8_t joined[4096 + 64];
         if (carry) { memcpy(joined, tail, carry); memcpy(joined + carry, buf, r); scan = joined; slen = r + carry; }
@@ -476,3 +572,8 @@ int ae_ld_scan_plaintext(ae_ld_t *c, const char *pw)
     if (!c || !pw || !*pw) return 0;
     return dir_contains(ae_store_root(c->store), pw, strlen(pw));
 }
+uint32_t ae_ld_evidence_count(ae_ld_t *c) { return evidence_file_lines(c); }
+const char *ae_ld_evidence_last(ae_ld_t *c) { return evidence_file_last(c); }
+int  ae_ld_hw_fuse_burned(ae_ld_t *c) { return c ? ae_hal_hw_fuse_burned(c->hal) : 0; }
+const char *ae_ld_hw_fuse_backend(ae_ld_t *c) { return c ? ae_hal_hw_fuse_backend(c->hal) : "none"; }
+int  ae_ld_service_mode(ae_ld_t *c) { return c ? ae_hal_service_mode(c->hal) : 0; }

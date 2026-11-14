@@ -1,0 +1,53 @@
+================ AetherOS round-005 证据：熔断「攻击意图分级」=================
+# 环境: 云电脑 x86_64 用户态 CLI；物理事件为 aether_hal 故障注入仿真（非真机电气检测）
+# 结论: 事件只作证据, 行为/攻击意图才触发 —— L1/L2 零删除, 仅 L3 软件抹除+烧毁硬件指令
+
+----- [1] 报告 A1-A3: L1 无害信号零删除、状态仍 LOCKED -----
+[L1-benign] usb-charge
+  L1 无害信号(usb-charge)：仅记录取证、零删除，保持 LOCKED(安全锁定模式)
+  状态=LOCKED(安全锁定模式) | 证据=1 | 硬件熔断=无
+[L1-benign] chassis-open
+  L1 无害信号(chassis-open)：仅记录取证、零删除，保持 LOCKED(安全锁定模式)
+  状态=LOCKED(安全锁定模式) | 证据=2 | 硬件熔断=无
+[L1-benign] testpoint-short(service)
+  L1 无害信号(testpoint-short(service))：仅记录取证、零删除，保持 LOCKED(安全锁定模式)
+  状态=LOCKED(安全锁定模式) | 证据=3 | 硬件熔断=无
+
+----- [2] 报告 A4: L2 可疑(未授权ADB) → 进 SUSPECT、零删除 -----
+[L2-suspect] adb-unauthorized
+  L2 可疑行为(adb-unauthorized)：断连+取证累计=4、进入 SUSPECT、零删除
+  状态=SUSPECT(可疑·证据累计中·零删除) | 证据=4 | 硬件熔断=无
+
+----- [3] 报告 A5: SUSPECT 下核心区导出(L3) 才允许熔断 -----
+[L3-attack] core-export
+  L3 确认攻击意图(core-export) → 摧毁系统(软件熔断) + 烧毁硬件 → 熔断：软件熔断抹除含系统本体的 6 个文件 + 报警 + 烧毁硬件指令(simulated(cloud-no-physical-fuse))；系统不可恢复(刷机可重装)
+  状态=BRICKED(软件熔断·系统不可恢复·刷机可重装) | 证据=0 | 硬件熔断=已锁存(云端仿真)
+  >>> 熔断已触发：软件抹除 + 烧毁硬件指令
+
+----- [4] 报告 A6: 官方维修白名单 全程不熔断 -----
+[SERVICE-whitelist] service-mode
+  已启用官方维修白名单(service-mode)：豁免物理开盖/短接类信号，但不豁免 L3 核心区导出
+  状态=LOCKED(安全锁定模式) | 证据=1 | 硬件熔断=无
+[L1-benign] chassis-open
+  L1 无害信号(chassis-open)：仅记录取证、零删除，保持 LOCKED(安全锁定模式)（维修白名单）
+  状态=LOCKED(安全锁定模式) | 证据=2 | 硬件熔断=无
+[L1-benign] testpoint-short(service)
+  L1 无害信号(testpoint-short(service))：仅记录取证、零删除，保持 LOCKED(安全锁定模式)（维修白名单）
+  状态=LOCKED(安全锁定模式) | 证据=3 | 硬件熔断=无
+[L2-suspect] adb-unauthorized
+  维修白名单：可疑行为(adb-unauthorized)仅记录取证、不升级、零删除
+  状态=LOCKED(安全锁定模式) | 证据=4 | 硬件熔断=无
+
+----- [5] L3 用户红线: USB破解强插 → 软件抹除 + 烧毁硬件指令 + 变砖 -----
+[L3-attack] usb-data-intrusion
+  L3 确认攻击意图(usb-data-intrusion) → 摧毁系统(软件熔断) + 烧毁硬件 → 熔断：软件熔断抹除含系统本体的 6 个文件 + 报警 + 烧毁硬件指令(simulated(cloud-no-physical-fuse))；系统不可恢复(刷机可重装)
+  状态=BRICKED(软件熔断·系统不可恢复·刷机可重装) | 证据=0 | 硬件熔断=已锁存(云端仿真)
+  >>> 熔断已触发：软件抹除 + 烧毁硬件指令
+
+----- [6] 变砖终态 + 零存储 + sys/ 抹除 -----
+安全锁定状态: BRICKED(软件熔断·系统本体不可恢复)
+  开机硬门: 拦截 | 系统本体已抹除 | 任何操作/任何密码均无法在本系统内恢复
+  如实标注: 软件熔断=刷机可重装(非硬件永久变砖)；硬件永久变砖由真机 eFuse(S6) 实现
+  唯一出路: 外部重刷镜像(真机由 bootloader/安全芯片管控)
+PASS 运行根内 0 处密码明文(零存储)
+sys/ 剩余文件数(应为 0): 0

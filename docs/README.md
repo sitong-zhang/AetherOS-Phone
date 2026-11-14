@@ -1,23 +1,34 @@
-# docs/ —— 工程文档索引
+# docs/ —— 工程文档索引（文档地图）
 
 本目录收录 AetherOS 主线的工程文档。仓库总览见根目录 [`README.md`](../README.md)。
-当前唯一需求源为《AetherOS 需求总文件 v2》；本仓库早期的「自包含 APK 内嵌虚拟机」
-交付形态已归档停用，见 [`../vm/DEPRECATED.md`](../vm/DEPRECATED.md)。
+当前唯一需求源为《AetherOS 需求总文件 v2》；「自包含 APK 内嵌虚拟机」旧交付形态已归档停用
+（见 [`../vm/DEPRECATED.md`](../vm/DEPRECATED.md)）。产品是**真 Linux 手机 OS、刷开发板/谷歌真机、不做 APK**。
 
-## 文档清单
+> 为避免文档散乱/口径冲突，文档分两类：**当前有效规范**（判向以此为准）
+> 与 **历史留痕**（如实记录当时状态，不作当前验收依据）。冲突时：V2 总文件 > 蓝图/有效规范 > 历史留痕。
+
+## 当前有效规范
 
 | 文档 | 内容 |
 | --- | --- |
-| [`00-BASELINE.md`](00-BASELINE.md) | 本机实测环境基线（v2 §2.1 重填）、测量方法、与参考环境差异、变更记录 |
-| [`01-STAGE-REPORT.md`](01-STAGE-REPORT.md) | 第一阶段报告：四件套（改了什么/为什么/怎么验证/未解决）、模块三档状态表 |
-| [`02-SECURE-REPORT.md`](02-SECURE-REPORT.md) | 第二阶段报告：安全整机四件套、真实缺陷清单、验收证据、诚实边界 |
-| [`SECURITY.md`](SECURITY.md) | **安全系统设计**：威胁模型、四区隔离、认证/保险库/自毁引擎、14 项特性、边界 |
-| [`SECURITY-BASELINE.md`](SECURITY-BASELINE.md) | **安全设计基线**：口号、威胁模型、三档数据保护、H1–H8 加固、安全锁定/熔断模式完整规格（首启强设专用密码·零存储·10秒冷却·组合键·物理熔断）、逐条验收口径、诚实边界 |
-| [`KERNEL.md`](KERNEL.md) | **自研 x86_64 内核**：架构、引导链关键坑（U/S 两级/系统调用映射/ATA 时序/摘要哈希）、系统调用、内核态安全、边界 |
-| [`03-KERNEL-STUDY.md`](03-KERNEL-STUDY.md) | 第三轮：开源 OS 教程调研与取舍（先搜后学，再落地） |
-| [`04-KERNEL-REPORT.md`](04-KERNEL-REPORT.md) | 第四轮：ring3 安全 demo 真机闭环 + 4 个内核 bug 四件套 + 证据清单 |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 八层架构、双轨、L2 十五域接口、§5.6 五门机检、阶段与门禁、参数治理、真机路线（含自研内核形态说明） |
-| [`../guest/AetherOS-系统进度说明.md`](../guest/AetherOS-系统进度说明.md) | 历史阶段 1–5 各模块落地状态（旧交付口径，仅供追溯，不作 v2 验收证据） |
+| [`SYSTEM-BLUEPRINT.md`](SYSTEM-BLUEPRINT.md) | **系统蓝图（单一真相源）**：要构建什么系统、整体思路、八层分层、双轨、目录地图、真实状态、阶段路线、诚实边界 |
+| [`ASSESSMENT-RESPONSE-001.md`](ASSESSMENT-RESPONSE-001.md) | 对《系统评估报告 2026-11-14》V1–V17/§4/§5 逐条研判（含「R&D 内核非产品内核」对象错位纠正） |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 八层架构、双轨、L2 十五域接口、§5.6 五门机检、阶段与门禁、参数治理、真机路线 |
+| [`SECURITY-BASELINE.md`](SECURITY-BASELINE.md) | **安全设计基线**：口号、威胁模型、三档数据保护、H1–H8 加固、安全锁定/熔断完整规格（零存储专用密码·10秒冷却·组合键·**攻击意图分级+软件/硬件熔断**）、逐条验收 |
+| 根目录 [`AGENTS.md`](../AGENTS.md) / [`CLAUDE.md`](../CLAUDE.md) | 项目定位与工程铁律（真系统/刷真机/不做 APK） |
+
+## 历史留痕（保留可追溯，不作当前验收依据）
+
+| 文档 | 内容 |
+| --- | --- |
+| [`00-BASELINE.md`](00-BASELINE.md) | 本机实测环境基线（v2 §2.1 重填） |
+| [`01-STAGE-REPORT.md`](01-STAGE-REPORT.md) | 第一阶段报告：四件套 + 模块三档状态表 |
+| [`02-SECURE-REPORT.md`](02-SECURE-REPORT.md) | 第二阶段报告：安全整机四件套、缺陷清单、验收证据（当时 81 项，现 252） |
+| [`SECURITY.md`](SECURITY.md) | 旧版安全系统设计：威胁模型、四区隔离、14 项特性 |
+| [`KERNEL.md`](KERNEL.md) | R&D 自研 x86_64 内核架构/引导链坑（**非产品内核**） |
+| [`03-KERNEL-STUDY.md`](03-KERNEL-STUDY.md) | 第三轮：开源 OS 教程调研与取舍 |
+| [`04-KERNEL-REPORT.md`](04-KERNEL-REPORT.md) | 第四轮：R&D 内核 ring3 demo（QEMU TCG 软件模拟）轮次报告 |
+| [`../guest/AetherOS-系统进度说明.md`](../guest/AetherOS-系统进度说明.md) | 历史阶段 1–5 各模块状态（旧 APK 口径，仅供追溯） |
 | [`../guest/OPENSOURCE-ATTRIBUTION.md`](../guest/OPENSOURCE-ATTRIBUTION.md) | 图标与第三方开源资产归属、许可证与采用理由 |
 | [`../LICENSE`](../LICENSE) | 仓库许可证 |
 
@@ -37,8 +48,10 @@
 | `../l2/` | L2 接口层：定义、仿真/桩实现、自测 |
 | `../secure/` | 安全整机本体：密码学、存储、认证、保险库、自毁、审计、CLI、自测 |
 | `../evidence/round-001/` | 第一轮四件套证据与第 1 门存量命中归因清单 |
-| `../evidence/round-002/` | 第二轮：81 项自测、OpenSSL 交叉验证、整机演示日志、3 份快照、4 张界面图、销毁证明 |
-| `../evidence/round-003/` | 第三轮内核：真实串口全程、QMP 真实 VGA 帧缓冲截图、销毁证明、34 项断言 JSON、退出码 |
+| `../evidence/round-002/` | 第二轮：安全整机自测（当时 81 项）、OpenSSL 交叉验证、整机演示日志、快照、销毁证明 |
+| `../evidence/round-003/` | 第三轮 R&D 内核：QEMU TCG 串口全程、VGA 帧缓冲截图、销毁证明、断言 JSON |
+| `../evidence/round-004/` | 第四轮：安全锁定/熔断首版 + 物理安全 HAL + 安全设计基线 |
+| `../evidence/round-005/` | 第五轮：熔断「攻击意图分级」+ 软件/硬件熔断 + 评估报告 A1–A8 验收取证（252 项自测） |
 
 ## 约定
 

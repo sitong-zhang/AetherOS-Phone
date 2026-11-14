@@ -1,4 +1,10 @@
-# AetherOS Phone — 客机用户态工程
+# AetherOS Phone — 客机用户态工程（历史留痕 · 旧 APK 口径）
+
+> ⚠️ **口径更正（2026-11-14）**：本文件开头及正文描述的是**已被推翻的旧交付形态**
+> ——「内置于 Android APK 的手机系统」。当前产品是**真 Linux 手机 OS、刷开发板/谷歌真机、
+> 不做 APK**（见根目录 `AGENTS.md` 与 `docs/SYSTEM-BLUEPRINT.md`）。
+> 本文件仅因记录「可复用的自研用户态上层」而有价值，**交付形态描述不作当前依据**。
+> 此处的 `guest/src` 源码本身仍是可复用资产（同一份上层源码原则）。
 
 AetherOS Phone 是内置于 Android APK（包名 `dev.aether.vm`）中的手机操作系统。宿主 APK
 通过 QEMU 引擎加载 aarch64 客机 Linux 内核与 `system.qcow2` 系统盘；开机后由本工程

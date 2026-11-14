@@ -146,7 +146,7 @@ static int build_snapshot(ae_secure_t *s, char *buf, size_t n)
         "\"系统区/数据区/日志区隔离\",\"可离线校验销毁证明\","
         "\"密钥驻留TEE锚点(软件当前/硬件真机)\",\"设备密钥自证attestation\","
         "\"设备密钥绑定审计链HMAC\",\"安全锁定/熔断模式(首启强设专用密码·零存储)\","
-        "\"组合键10秒+二次确认进入\",\"USB强插/拆机/短接→连系统抹除变砖\"]\n"
+        "\"组合键10秒+二次确认进入\",\"熔断按攻击意图分级(L1/L2零删除·L3软件抹除+烧毁硬件)\"]\n"
         "}\n",
         roote, state_str(ae_secure_state(s)),
         ae_secure_fails(s), ae_secure_max_fails(s),
@@ -320,11 +320,16 @@ static int ld_status(int argc, char **argv)
     printf("  专用密码已设定: %s | 验证锚落盘: %s | 开机硬门: %s\n",
            ae_ld_is_provisioned(g_ld) ? "是" : "否",
            ae_ld_anchor_exists(g_ld) ? "是" : "否",
-           ae_ld_oobe_gate(g_ld) ? "放行" : "拦截(未设定/已变砖)");
+           ae_ld_oobe_gate(g_ld) ? "放行" : "拦截(未设定/已软件熔断)");
     printf("  物理后端: %s | 安全芯片: %s | 报警计数: %u\n",
            ae_hal_backend_name(g_hal),
            ae_hal_secure_element(g_hal) ? "硬件在线" : "软件锚点(真机接 TEE/eFuse)",
            ae_hal_alarm_count(g_hal));
+    printf("  证据链: %u 条 | 维修白名单: %s | 硬件熔断后端: %s\n",
+           ae_ld_evidence_count(g_ld),
+           ae_ld_service_mode(g_ld) ? "开启" : "关闭",
+           ae_ld_hw_fuse_backend(g_ld));
+    printf("  注: L1无害/L2可疑 零删除；仅 L3 确认攻击意图才熔断(软件抹除+烧毁硬件指令)\n");
     return 0;
 }
 static int ld_gesture(int argc, char **argv)
@@ -351,21 +356,61 @@ static int ld_unlock(int argc, char **argv)
     printf("%s\n", m);
     return rc;
 }
+/* 事件关键字 → 物理事件（分级判据见 aether_hal.h）。 */
+static int ld_parse_event(const char *kind, ae_hal_event_t *out)
+{
+    struct { const char *k; ae_hal_event_t ev; } map[] = {
+        /* L1 无害 */
+        {"charge",      AE_EV_USB_CHARGE},
+        {"chassis",     AE_EV_CHASSIS_OPEN},
+        {"short",       AE_EV_TESTPOINT_SHORT},
+        {"service",     AE_EV_SERVICE_MODE},
+        /* L2 可疑 */
+        {"adb",         AE_EV_ADB_UNAUTH},
+        {"auth-fail",   AE_EV_AUTH_FAIL},
+        {"enum",        AE_EV_MASS_ENUM},
+        {"core-read",   AE_EV_CORE_READ},
+        /* L3 确认攻击意图（用户钦定红线：立即熔断） */
+        {"usb",         AE_EV_USB_DATA},        /* USB 数据强插破解 */
+        {"core-export", AE_EV_CORE_EXPORT},    /* 核心区/用户数据导出 */
+        {"key-tamper",  AE_EV_KEY_TAMPER},     /* 密钥区触碰 */
+        {"short-core",  AE_EV_SHORT_CORE},     /* 拆机短接触及核心区 */
+    };
+    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
+        if (!strcmp(kind, map[i].k)) { *out = map[i].ev; return 0; }
+    return -1;
+}
 static int ld_inject(int argc, char **argv)
 {
-    const char *kind = (argc > 0) ? argv[0] : "";
-    ae_hal_event_t ev;
-    if (!strcmp(kind, "usb")) ev = AE_EV_USB_DATA;
-    else if (!strcmp(kind, "chassis")) ev = AE_EV_CHASSIS_OPEN;
-    else if (!strcmp(kind, "short")) ev = AE_EV_TESTPOINT_SHORT;
-    else { printf("用法: ld-inject <usb|chassis|short>\n"); return -1; }
-    char m[512];
+    /* 支持一串事件（同一进程内依次注入，便于演示维修白名单/证据累计/攻击升级）；
+     * --now <毫秒> 指定起始时刻。 */
+    int n_ev = 0;
+    for (int i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "--now") && i + 1 < argc) { i++; continue; }
+        ae_hal_event_t probe;
+        if (ld_parse_event(argv[i], &probe) == 0) n_ev++;
+    }
+    if (n_ev == 0) {
+        printf("用法: ld-inject <事件...> [--now <毫秒>]\n"
+               "  L1无害(零删除): charge | chassis | short | service(维修白名单)\n"
+               "  L2可疑(取证·零删除): adb | auth-fail | enum | core-read\n"
+               "  L3攻击意图(立即熔断): usb | core-export | key-tamper | short-core\n");
+        return -1;
+    }
     uint64_t now = ld_arg_now(argc, argv, ae_hal_now_ms(g_hal));
-    (void)ae_hal_inject(g_hal, ev);
-    int fired = ae_ld_on_event(g_ld, ev, now, m, sizeof m);
-    printf("%s\n", m);
-    printf("熔断触发: %s | 状态: %s | 报警: %u\n",
-           fired ? "是" : "否", ae_ld_state_name(g_ld), ae_hal_alarm_count(g_hal));
+    char m[512];
+    for (int i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "--now") && i + 1 < argc) { i++; continue; }
+        ae_hal_event_t ev;
+        if (ld_parse_event(argv[i], &ev) != 0) continue;
+        (void)ae_hal_inject(g_hal, ev);
+        int fired = ae_ld_on_event(g_ld, ev, now + (uint64_t)i, m, sizeof m);
+        printf("[%s] %s\n  %s\n  状态=%s | 证据=%u | 硬件熔断=%s\n",
+               ae_hal_threat_name(ae_hal_event_threat(ev)), ae_hal_event_name(ev), m,
+               ae_ld_state_name(g_ld), ae_ld_evidence_count(g_ld),
+               ae_ld_hw_fuse_burned(g_ld) ? "已锁存(云端仿真)" : "无");
+        if (fired) { printf("  >>> 熔断已触发：软件抹除 + 烧毁硬件指令\n"); break; }
+    }
     return 0;
 }
 
@@ -392,7 +437,9 @@ static int cmd_help(ae_secure_t *s, int argc, char **argv)
       "  ld-status                                     查看锁定状态/硬门/物理后端\n"
       "  ld-gesture   [--now <毫秒>]                   组合键：电源+音量下满10秒+音量上确认\n"
       "  ld-unlock    --pw <专用密码>                  用专用密码退出安全锁定模式\n"
-      "  ld-inject    <usb|chassis|short> [--now ...]  注入物理破解(USB强插/拆机/短接)→熔断\n"
+      "  ld-inject    <事件> [--now ...]               注入物理事件(分级判据)\n"
+      "      L1无害零删除: charge chassis short service | L2取证零删除: adb auth-fail enum core-read\n"
+      "      L3攻击意图→软件抹除+烧毁硬件: usb core-export key-tamper short-core\n"
       "  help / exit                                  帮助 / 退出\n");
     return 0;
 }
@@ -467,12 +514,13 @@ int main(int argc, char **argv)
         struct stat bst;
         if (stat(brick, &bst) == 0 && S_ISREG(bst.st_mode)) {
             if (!strcmp(cmd, "ld-status")) {
-                printf("安全锁定状态: BRICKED(已熔断·永久变砖)\n"
-                       "  开机硬门: 拦截 | 系统本体已抹除 | 任何操作/任何密码均无法恢复\n"
+                printf("安全锁定状态: BRICKED(软件熔断·系统本体不可恢复)\n"
+                       "  开机硬门: 拦截 | 系统本体已抹除 | 任何操作/任何密码均无法在本系统内恢复\n"
+                       "  如实标注: 软件熔断=刷机可重装(非硬件永久变砖)；硬件永久变砖由真机 eFuse(S6) 实现\n"
                        "  唯一出路: 外部重刷镜像(真机由 bootloader/安全芯片管控)\n");
                 return 0;
             }
-            printf("ERR 设备已熔断变砖：系统本体已抹除，任何命令均被拒（需外部重刷）\n");
+            printf("ERR 设备已软件熔断：系统本体已抹除，任何命令均被拒（刷机可重装）\n");
             return 3;
         }
     }

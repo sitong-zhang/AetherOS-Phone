@@ -1,8 +1,14 @@
-# round-004 证据清单 · 安全锁定 / 熔断模式
+# round-004 证据清单 · 安全锁定 / 熔断模式（首版，历史留痕）
+
+> ⚠️ **本轮已被 round-005 取代（口径更正）**：本报告记录的是**首版「事件即熔断」**语义
+> （插 USB / 开盖 / 短接即删系统）。用户 11-14 澄清后，熔断已改为**「攻击意图分级」**
+> （L1/L2 零删除、仅 L3 立即软件抹除 + 烧毁硬件），见 `ASSESSMENT-RESPONSE-001.md`
+> 与 `evidence/round-005/`。下面第 3、4 条及「永久变砖」为**当时首版口径**，保留作留痕，
+> **不作当前规格依据**；当前规格以 `docs/SECURITY-BASELINE.md` §2.1/§2.2 为准。
 
 - 范围：按 V2 总纲「主打安全」新增的**安全锁定 / 熔断模式**（用户态安全整机 `secure/`）。
 - 环境：云电脑用户态 CLI（软件仿真）；物理事件走 `aether_hal` 故障注入，非真机电气检测。
-- 复现：`bash scripts/secure.sh build && bash scripts/secure.sh test`；CLI 流程见 `SECURITY-BASELINE.md` §7。
+- 复现（当时）：`bash scripts/secure.sh build && bash scripts/secure.sh test`；CLI 流程见 `SECURITY-BASELINE.md` §7。
 
 | 文件 | 内容 |
 |---|---|

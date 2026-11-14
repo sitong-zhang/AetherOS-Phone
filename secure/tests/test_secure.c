@@ -415,8 +415,12 @@ static void group_tee_attest(void)
  *   - 零存储：扫描整个运行根，密码明文一个字节都不落盘
  *   - 组合键状态机：满 10 秒 + 音量上确认才进入；不足/松开/超时不进
  *   - 仅专用密码可解锁，错误密码无旁路
- *   - USB 强插 / 拆机 / 短接 → 报警 + 连系统一并抹除 + 永久变砖
- *   - 状态跨「重启」（重新 open）持久化，变砖不可恢复
+ *   - 熔断分级判据：L1无害/L2可疑 零删除；仅 L3 确认攻击意图才软件抹除+烧毁硬件
+ *   - 状态跨「重启」（重新 open）持久化，软件熔断不可在本系统内恢复
+ * 组 M：评估报告 §4.5 验收 A1–A8（外部可观测）
+ *   - A1 充电、A2 开盖、A3 维修短接 均零删除；A4 ADB 进 SUSPECT 零删除
+ *   - A5 SUSPECT 后核心区导出才熔断；A6 维修白名单全程不熔断
+ *   - A7 软件熔断后重启系统不可恢复(刷机可重装)；A8 云端无物理防拆硬件如实标注
  * ================================================================ */
 #define LD_PW_OK "Abc!Def@Ghi#Jkl$Mn0PqRs"   /* 23 位：大小写+特殊+数字，无 >5 连续序列 */
 
@@ -550,35 +554,40 @@ static void group_lockdown(void)
     CHECK(ae_ld_state(fx.ld) == AE_LD_NORMAL, "L3 解锁后回 NORMAL");
     ld_teardown(&fx);
 
-    /* --- L4 物理红线 → 熔断(连系统抹除 + 报警 + 变砖) --- */
+    /* --- L4 用户钦定红线：仅 L3「确认攻击意图」→ 软件熔断 + 烧毁硬件 ---
+     * 物理事件不再是「即熔断」；只有触及用户数据/系统核心区且判定攻击意图的
+     * L3 事件才立即摧毁系统 + 烧毁硬件（USB破解强插/核心区导出/密钥触碰/短接取核心数据）。 */
     {
-        const char *trig[] = {"usb-data", "chassis", "short"};
-        ae_hal_event_t evs[] = {AE_EV_USB_DATA, AE_EV_CHASSIS_OPEN, AE_EV_TESTPOINT_SHORT};
+        ae_hal_event_t evs[] = {AE_EV_USB_DATA, AE_EV_CORE_EXPORT,
+                                AE_EV_KEY_TAMPER, AE_EV_SHORT_CORE};
+        const char *trig[] = {"usb-data-intrusion", "core-export", "key-tamper", "short-to-core"};
         int k;
-        for (k = 0; k < 3; k++) {
+        for (k = 0; k < 4; k++) {
             char tag[64]; snprintf(tag, sizeof tag, "l4%d", k);
             CHECK(ld_setup(tag, &fx) == 0, "L4 建独立运行根");
-            /* 放一个系统本体文件，熔断后应被抹掉（区别于常规 wipe 保留 sys） */
+            CHECK(ae_hal_event_threat(evs[k]) == AE_THREAT_L3, "L4 事件判据=L3 攻击意图");
             CHECK(ae_store_atomic_write(fx.st, AE_ZONE_SYS, "aether.bin",
                                         "SYSTEM-CORE", 11) == 0, "L4 写入系统本体文件");
             CHECK(ld_to_locked(fx.ld, fx.hal, LD_PW_OK) == 0, "L4 设定并进入 LOCKED");
-            char bm[256];
+            char bm[320];
             int fired = ae_ld_on_event(fx.ld, evs[k], 70000, bm, sizeof bm);
-            CHECK(fired == 1, "L4 物理事件触发熔断");
-            CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "L4 状态 BRICKED");
+            CHECK(fired == 1, "L4 L3 攻击意图触发熔断");
+            CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "L4 状态 BRICKED(软件熔断)");
             CHECK(ae_hal_alarm_count(fx.hal) >= 1, "L4 触发报警机制");
             CHECK(strstr(ae_hal_alarm_last(fx.hal), trig[k]) != NULL, "L4 报警含触发原因");
             CHECK(!ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"),
                   "L4 系统本体被一并抹除(连系统删)");
             CHECK(ae_store_exists(fx.st, AE_ZONE_LOCKDOWN, "BRICKED"),
-                  "L4 变砖墓碑持久");
+                  "L4 软件熔断墓碑持久");
+            CHECK(ae_ld_hw_fuse_burned(fx.ld) == 1, "L4 烧毁硬件指令已锁存");
+            CHECK(strstr(ae_ld_hw_fuse_backend(fx.ld), "simulated") != NULL,
+                  "L4 硬件熔断后端如实=云端仿真(非物理烧毁)");
             CHECK(ae_ld_unlock(fx.ld, LD_PW_OK, why, sizeof why) == -3,
-                  "L4 变砖后即使正确密码也退不出");
-            CHECK(ae_ld_oobe_gate(fx.ld) == 0, "L4 变砖后开机硬门永久不放行");
-            /* 跨重启：变砖状态不可恢复 */
+                  "L4 软件熔断后即使正确密码也退不出");
+            CHECK(ae_ld_oobe_gate(fx.ld) == 0, "L4 软件熔断后开机硬门不放行");
             ae_ld_close(fx.ld); fx.ld = NULL;
             CHECK(ae_ld_open(fx.st, fx.hal, &fx.ld) == 0, "L4 重新 open");
-            CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "L4 变砖跨重启持久(永久板砖)");
+            CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "L4 软件熔断跨重启持久");
             ld_teardown(&fx);
         }
     }
@@ -594,6 +603,104 @@ static void group_lockdown(void)
     ld_teardown(&fx);
 }
 
+/* 建根 → 设定并进 LOCKED → 放一个系统本体文件(供"零删除/连系统删"判定) */
+static int m_ready(ld_fx_t *fx, const char *tag)
+{
+    if (ld_setup(tag, fx) != 0) return -1;
+    if (ld_to_locked(fx->ld, fx->hal, LD_PW_OK) != 0) return -1;
+    if (ae_store_atomic_write(fx->st, AE_ZONE_SYS, "aether.bin",
+                              "SYSTEM-CORE", 11) != 0) return -1;
+    return 0;
+}
+
+/* 组 M：评估报告 §4.5 验收 A1–A8（分级判据，外部可观测，用户 11-14 澄清） */
+static void group_assessment_A(void)
+{
+    GROUP("M 评估报告 §4.5 A1–A8（事件只作证据·攻击意图才熔断）");
+    char d[1024];
+    ld_fx_t fx;
+
+    /* A1/A2/A3：L1 无害（充电/开盖/维修短接未触核心区）→ 零删除、仍 LOCKED */
+    {
+        ae_hal_event_t l1[] = {AE_EV_USB_CHARGE, AE_EV_CHASSIS_OPEN, AE_EV_TESTPOINT_SHORT};
+        const char *nm[] = {"A1充电", "A2开盖", "A3维修短接"};
+        int k;
+        for (k = 0; k < 3; k++) {
+            char tag[64]; snprintf(tag, sizeof tag, "m1%d", k);
+            CHECK(m_ready(&fx, tag) == 0, "M 建根并进 LOCKED");
+            CHECK(ae_hal_event_threat(l1[k]) == AE_THREAT_L1, "M 判据=L1 无害");
+            int fired = ae_ld_on_event(fx.ld, l1[k], 70000, d, sizeof d);
+            char c[160];
+            snprintf(c, sizeof c, "%s 不熔断(fired=0)", nm[k]);              CHECK(fired == 0, c);
+            snprintf(c, sizeof c, "%s 状态仍 LOCKED", nm[k]);                 CHECK(ae_ld_state(fx.ld) == AE_LD_LOCKED, c);
+            snprintf(c, sizeof c, "%s sys/ 系统本体零删除", nm[k]);           CHECK(ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), c);
+            snprintf(c, sizeof c, "%s 证据链已记录", nm[k]);                   CHECK(ae_ld_evidence_count(fx.ld) >= 1, c);
+            CHECK(ae_ld_hw_fuse_burned(fx.ld) == 0, "M L1 不触发硬件熔断");
+            ld_teardown(&fx);
+        }
+    }
+
+    /* A4：L2 未授权 ADB → 断连+取证+进 SUSPECT，零删除；A5：核心区导出(L3)才熔断 */
+    CHECK(m_ready(&fx, "m4") == 0, "A4 建根并进 LOCKED");
+    CHECK(ae_hal_event_threat(AE_EV_ADB_UNAUTH) == AE_THREAT_L2, "A4 判据=L2 可疑");
+    {
+        int fired = ae_ld_on_event(fx.ld, AE_EV_ADB_UNAUTH, 70000, d, sizeof d);
+        CHECK(fired == 0, "A4 未授权 ADB 不熔断(零删除)");
+        CHECK(ae_ld_state(fx.ld) == AE_LD_SUSPECT, "A4 进入 SUSPECT 可疑态");
+        CHECK(ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), "A4 sys/ 零删除");
+        CHECK(ae_ld_evidence_count(fx.ld) >= 1, "A4 证据累计");
+        CHECK(ae_ld_hw_fuse_burned(fx.ld) == 0, "A4 不触发硬件熔断");
+        /* A5 */
+        fired = ae_ld_on_event(fx.ld, AE_EV_CORE_EXPORT, 71000, d, sizeof d);
+        CHECK(fired == 1, "A5 SUSPECT 下核心区导出(L3) 才允许熔断");
+        CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "A5 状态 BRICKED(软件熔断)");
+        CHECK(!ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), "A5 连系统抹除");
+        CHECK(ae_ld_hw_fuse_burned(fx.ld) == 1, "A5 烧毁硬件指令已锁存");
+    }
+    ld_teardown(&fx);
+
+    /* A6：官方维修白名单(签名凭证)下开盖/短接/ADB/充电 全程不熔断 */
+    CHECK(m_ready(&fx, "m6") == 0, "A6 建根并进 LOCKED");
+    {
+        (void)ae_ld_on_event(fx.ld, AE_EV_SERVICE_MODE, 70000, d, sizeof d);
+        CHECK(ae_ld_service_mode(fx.ld) == 1, "A6 维修白名单已开启");
+        ae_hal_event_t seq[] = {AE_EV_CHASSIS_OPEN, AE_EV_TESTPOINT_SHORT,
+                                AE_EV_ADB_UNAUTH, AE_EV_USB_CHARGE};
+        int k, allzero = 1;
+        for (k = 0; k < 4; k++)
+            if (ae_ld_on_event(fx.ld, seq[k], 71000u + (uint64_t)k, d, sizeof d) != 0) allzero = 0;
+        CHECK(allzero == 1, "A6 白名单下 开盖/短接/ADB/充电 全程不熔断");
+        CHECK(ae_ld_state(fx.ld) == AE_LD_LOCKED, "A6 白名单下保持 LOCKED(不升级 SUSPECT)");
+        CHECK(ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), "A6 全程零删除");
+        CHECK(ae_ld_hw_fuse_burned(fx.ld) == 0, "A6 不触发硬件熔断");
+        int fired = ae_ld_on_event(fx.ld, AE_EV_CORE_EXPORT, 80000, d, sizeof d);
+        CHECK(fired == 1, "A6 白名单不豁免 L3 核心区导出(防伪造凭证绕过)");
+    }
+    ld_teardown(&fx);
+
+    /* A7：软件熔断后重启 → 系统不可恢复，但如实标注刷机可重装(非硬件永久变砖) */
+    CHECK(m_ready(&fx, "m7") == 0, "A7 建根并进 LOCKED");
+    (void)ae_ld_on_event(fx.ld, AE_EV_USB_DATA, 70000, d, sizeof d);
+    ae_ld_close(fx.ld); fx.ld = NULL;
+    CHECK(ae_ld_open(fx.st, fx.hal, &fx.ld) == 0, "A7 重新 open(模拟重启)");
+    CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "A7 软件熔断跨重启不可恢复");
+    CHECK(ae_ld_oobe_gate(fx.ld) == 0, "A7 开机硬门不放行");
+    CHECK(strstr(ae_ld_state_name(fx.ld), "刷机可重装") != NULL,
+          "A7 状态如实标注『刷机可重装』(非硬件永久变砖)");
+    ld_teardown(&fx);
+
+    /* A8：云端无物理防拆硬件 → 硬件后端未实现、硬件熔断 simulation-only 如实标注 */
+    {
+        ae_hal_t *hw = NULL;
+        CHECK(ae_hal_open(AE_HAL_HW, &hw) == -1, "A8 真机硬件后端如实未实现(open=-1)");
+        CHECK(hw == NULL, "A8 未伪造硬件对象");
+    }
+    CHECK(m_ready(&fx, "m8") == 0, "A8 建根(仿真后端)");
+    CHECK(strstr(ae_ld_hw_fuse_backend(fx.ld), "simulated") != NULL,
+          "A8 硬件熔断后端=simulation-only(不宣称已具备物理防拆)");
+    ld_teardown(&fx);
+}
+
 int main(void)
 {
     printf("================ AetherOS Secure Core 全套自测 ================\n");
@@ -606,6 +713,7 @@ int main(void)
     group_idle_backoff();
     group_tee_attest();
     group_lockdown();
+    group_assessment_A();
     printf("\n================================================================\n");
     printf("  合计: %d PASS / %d FAIL\n", P, F);
     printf("================================================================\n");

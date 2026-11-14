@@ -11,17 +11,28 @@
  *        无法倒推回密码」的验证锚 verifier（+ salt），密码明文永不落盘/日志/
  *        快照，用完即从内存清零。若连验证锚都不留，系统便无法判断对错，
  *        连机主自己也永远解不开——故留「不可倒推的锚」而非「密码」。
- *  5) 不可重置 / 不可找回 / 无修改入口，仅首次设定有效；忘记 = 永久锁死。
+ *  5) 不可重置 / 不可找回 / 无修改入口，仅首次设定有效；忘记 = 无法解锁。
  *  6) 触发：电源+音量下 同按满 10 秒(不足无效、超时保持待确认) → 再按一下
  *     音量上二次确认 → 进入安全锁定模式；未设密码则组合键完全无效。
- *  7) 进入后：仅该专用密码可解锁；其余路径(锁屏/生物/ADB/recovery/刷机/
- *     USB/调试口)全部封死——「其他任何方式都破解不了」。
- *  8) 熔断红线：安全锁定态下 USB 数据强插 / 拆机 / 短接 → 触发报警 +
- *     抹除「用户数据 + 系统本体」(连系统一起删)，永久变砖、需重刷。
- *     区别于常规档(输错口令只抹用户数据、系统保留) 与 胁迫档(诱饵环境)。
+ *  7) 进入后：仅该专用密码可解锁；其余路径(锁屏/生物/ADB/recovery/刷机/USB/调试口)封死。
+ *  8) 熔断分级判据（用户 2026-11-14 澄清 + 评估报告 §4.3/§4.5）：
+ *     **事件只作证据，行为/攻击意图才触发**——不是「插 USB / 开盖 / 碰测试点就删」：
+ *       L1 无害(充电/开盖/维修短接未触核心区) → 仅记录取证、零删除、保持锁定
+ *       L2 可疑(未授权ADB/反复鉴权失败/存储枚举/核心区侦察读) → 断连+取证累计、进 SUSPECT、零删除
+ *       L3 确认攻击意图(USB强插破解/短接触及核心区/核心区导出/密钥区触碰)
+ *          → 立即摧毁系统(软件熔断) + 烧毁硬件(硬件熔断) + 报警 + 变砖标记
+ *       官方维修白名单(签名凭证) → 豁免物理开盖/短接类信号，但不豁免 L3 核心区导出
+ *     用户钦定红线：USB 破解强插 / 触及用户数据·系统核心区的短接 / 核心区访问 = 立即熔断。
+ *  9) 三档语义严格区分：常规档(输错只抹 data/、保留系统) / 胁迫档(诱饵) /
+ *     熔断档(连系统抹除)。熔断又分两档并分开命名/验收（报告 §4.3 建议 2）：
+ *       「软件熔断」= 删全部分区 + BRICKED 标记 + 引导级拦截 → 系统本体不可恢复，
+ *                     但**刷机可重装**（不叫永久变砖）。
+ *       「硬件熔断」= 真机 eFuse/OTP 烧写或 crowbar 烧毁存储供电 → 物理永久变砖；
+ *                     云端仅仿真熔断指令锁存，真机 S6 才有。
  *
- * 诚实边界：物理事件检测走 aether_hal 云端仿真注入；真机 S6 接 GPIO/TEE。
- *           「任何方式破解不了」在真机依赖安全芯片/eFuse，云端为软件仿真。
+ * 诚实边界：物理事件走 aether_hal 云端仿真注入；真机 S6 接 GPIO/TEE/eFuse。
+ *           云端「烧毁硬件」是仿真指令锁存，不是真的烧毁 eFuse。
+ *           软件层只能做到「系统不可恢复」，刷机仍可清除——绝不虚称「永久变砖」。
  */
 #ifndef AETHER_LOCKDOWN_H
 #define AETHER_LOCKDOWN_H
@@ -37,7 +48,10 @@
 #define AE_LD_COOLDOWN_MS   10000u  /* 二次确认窗确定按钮冷却 */
 #define AE_LD_GESTURE_MS    10000u  /* 组合键同按满 10 秒 */
 #define AE_LD_ANCHOR_FILE   "lockdown.anchor"  /* 存 lockdown/ 区：verifier 锚，非密码 */
-#define AE_LD_BRICK_FILE    "BRICKED"          /* 变砖标记（落 root，跨区持久） */
+#define AE_LD_BRICK_FILE    "BRICKED"          /* 软件熔断标记（落 root，跨区持久） */
+#define AE_LD_EVID_FILE     "evidence.log"     /* L1/L2 证据链（只追加，清零=篡改线索） */
+#define AE_LD_MODE_LOCKED   "LOCKED"
+#define AE_LD_MODE_SUSPECT  "SUSPECT"
 
 typedef enum {
     AE_LD_UNSET     = 0,  /* 首启：尚未设定专用密码（硬门：不放行进系统） */
@@ -45,7 +59,8 @@ typedef enum {
     AE_LD_GESTURE   = 2,  /* 组合键计时中（未满 10 秒） */
     AE_LD_ARMED     = 3,  /* 已满 10 秒，等待「音量上」二次确认 */
     AE_LD_LOCKED    = 4,  /* 安全锁定模式：仅专用密码可退出 */
-    AE_LD_BRICKED   = 5   /* 已熔断：连系统抹除、永久变砖 */
+    AE_LD_SUSPECT   = 5,  /* 可疑态：L2 证据累计中，仍仅专用密码可退、零删除 */
+    AE_LD_BRICKED   = 6   /* 软件熔断：连系统抹除、系统不可恢复（刷机可重装） */
 } ae_ld_state_t;
 
 typedef struct ae_ld ae_ld_t;
@@ -63,8 +78,7 @@ const char   *ae_ld_state_name(ae_ld_t *c);
 int  ae_ld_check_strength(const char *pw, char *why, size_t n);
 
 /* 首启硬门第一步：校验强度 + 生成二次确认弹窗文案(含明文回显) + 进入冷却。
- * 返回 0 进入待确认，-1 强度不合格(why 说明)，-2 已设定(不可重置)。
- * 注意：pw 只在此调用栈内使用，绝不写入磁盘；回显只出现在 dialog 缓冲(内存/屏幕)。 */
+ * 返回 0 进入待确认，-1 强度不合格(why 说明)，-2 已设定(不可重置)。 */
 int  ae_ld_provision_begin(ae_ld_t *c, const char *pw,
                            char *dialog, size_t dialog_n,
                            char *why, size_t why_n);
@@ -77,26 +91,31 @@ int  ae_ld_provision_confirm(ae_ld_t *c, uint64_t now_ms,
 /* 是否已设定（供开机链判断硬门：未设定则停留在 OOBE，不放行进系统）。 */
 int  ae_ld_is_provisioned(ae_ld_t *c);
 
-/* 开机硬门：0=未设密码/已变砖（不放行进系统），1=允许进入系统。
- * 由 OOBE 开机链在 init 服务编排前调用（真机 S3 接入；云端 CLI 提供 status 可见）。 */
+/* 开机硬门：0=未设密码/已熔断（不放行进系统），1=允许进入系统。 */
 int  ae_ld_oobe_gate(ae_ld_t *c);
 
-/* 喂一个物理事件给状态机。返回 0 已消费；>0 表示触发了熔断(见 ae_ld_brick)。
- *   NORMAL/GESTURE/ARMED：组合键推进；LOCKED：USB/拆机/短接 → 熔断。 */
+/* 喂一个物理事件给状态机。返回 0 已消费、未熔断；>0 表示触发了熔断(L3)。
+ *   NORMAL/GESTURE/ARMED：组合键推进；
+ *   LOCKED/SUSPECT：按 ae_hal_event_threat() 分级动作（见文件头 §8）。
+ * 「事件只作证据」——L1/L2 零删除，只有 L3 确认攻击意图才立即熔断。 */
 int  ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
                     char *msg, size_t n);
 
 /* 安全锁定模式解锁：仅专用密码。返回 0 成功退出到 NORMAL，-1 密码错，
- * -2 当前不在 LOCKED，-3 已变砖(任何方式都退不出)。 */
+ * -2 当前不在 LOCKED/SUSPECT，-3 已软件熔断(任何方式都退不出)。 */
 int  ae_ld_unlock(ae_ld_t *c, const char *pw, char *msg, size_t n);
 
-/* 熔断：抹除全部数据 + 系统本体(sys/ 也删)，报警，落变砖标记。
- * 与常规 wipe(系统保留)严格区分。返回 0 成功。 */
+/* 软件熔断：抹除全部数据 + 系统本体(sys/ 也删)，报警，落 BRICKED 标记。
+ * 系统本体不可恢复，但刷机可重装（≠ 硬件永久变砖）。与常规 wipe(系统保留)严格区分。 */
 int  ae_ld_brick(ae_ld_t *c, const char *trigger, char *msg, size_t n);
 
-/* 诊断/取证：验证锚是否落盘、密码明文是否出现在任何文件中（外部可观测用）。
- * scan_plaintext：扫描 root 下全部文件，若发现 pw 明文字节串返回 1，0 未发现。 */
-int  ae_ld_anchor_exists(ae_ld_t *c);
-int  ae_ld_scan_plaintext(ae_ld_t *c, const char *pw);
+/* 外部可观测诊断 */
+int  ae_ld_anchor_exists(ae_ld_t *c);            /* 验证锚是否落盘 */
+int  ae_ld_scan_plaintext(ae_ld_t *c, const char *pw);  /* 全盘扫密码明文，1=发现(不合格) */
+uint32_t ae_ld_evidence_count(ae_ld_t *c);       /* L1/L2 证据累计条数 */
+const char *ae_ld_evidence_last(ae_ld_t *c);      /* 最后一条证据事件名 */
+int  ae_ld_hw_fuse_burned(ae_ld_t *c);            /* 硬件熔断指令是否已锁存（云端仿真） */
+const char *ae_ld_hw_fuse_backend(ae_ld_t *c);    /* simulated / efuse(S6-placeholder) */
+int  ae_ld_service_mode(ae_ld_t *c);              /* 官方维修白名单是否开启 */
 
 #endif /* AETHER_LOCKDOWN_H */

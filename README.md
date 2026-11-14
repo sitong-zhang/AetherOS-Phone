@@ -1,5 +1,9 @@
 # AetherOS
 
+> 📘 **先读 [`docs/SYSTEM-BLUEPRINT.md`](docs/SYSTEM-BLUEPRINT.md)（系统蓝图 · 单一真相源）**：
+> 讲清「要构建什么系统、整体思路、八层分层、双轨、目录职责、真实状态、阶段路线、诚实边界」，
+> 并给出文档地图（哪些是当前有效规范、哪些是历史留痕）。口径冲突时以 V2 总文件为准、其次以蓝图为准。
+
 AetherOS 是一套**基于 Linux 内核的移动操作系统（手机 OS），主打安全**。内核为 **Linux**
 （v2 总文件产品目标为「Linux 内核 + 自研用户态」），用户态完全自研；不基于 AOSP、不基于现成
 发行版。**目标是刷入开发板与谷歌 Pixel 真机实测**；当前在云电脑上做系统构建与调试，软件模拟
@@ -11,7 +15,7 @@ AetherOS 是一套**基于 Linux 内核的移动操作系统（手机 OS），�
 > **并非产品内核**；其 ring3「安全 demo」经审计存在 V1–V17 多项缺陷（用户态可任意读写内核内存、
 > 坏指针即整机停机、任务间无地址隔离等），**不代表产品安全能力**，详见 `AetherOS-漏洞清单-1114.md`
 > 与 [`docs/KERNEL.md`](docs/KERNEL.md)。产品安全能力以 [`secure/`](secure/)（用户态安全整机本体，
-> 179/0 自测，含 TEE 密钥锚点 / 设备自证 / 密钥绑定审计链 / 安全锁定熔断模式）及随 Linux 内核运行的安全子系统为准。
+> 252/0 自测，含 TEE 密钥锚点 / 设备自证 / 密钥绑定审计链 / 安全锁定熔断模式分级判据）及随 Linux 内核运行的安全子系统为准。
 
 本项目的运行环境是**云电脑**，用软件模拟把整机真实跑起来：真实开机、真实出图、真实响应
 输入。系统本体**不是 Android 应用、不是 APK、不是虚拟机套壳预览包**。
@@ -32,9 +36,14 @@ AetherOS 是一套**基于 Linux 内核的移动操作系统（手机 OS），�
   连续序列≤5 的**专用安全密码**（二次确认弹窗明文回显 + 确定按钮 10 秒冷却）；
   系统**零存储密码明文**（只留不可倒推的验证锚），不可重置/不可找回、仅首次有效。
   `电源+音量下` 同按满 10 秒再点 `音量上` 进入安全锁定模式——此后**仅该密码可解锁**，
-  其余路径全封死；**USB 强插 / 拆机 / 短接 → 报警 + 连系统一并抹除 + 永久变砖**。
-  物理检测走 `aether_hal` 可替换接口（云端故障注入仿真，真机接 GPIO/TEE）。
-  规格与验收见 [`docs/SECURITY-BASELINE.md`](docs/SECURITY-BASELINE.md)。
+  其余路径全封死。**熔断按「攻击意图分级」**（用户 11-14 澄清）：正常充电/开盖/维修短接
+  未触及核心区（L1）与未授权 ADB/取证侦察（L2）**只作证据、零删除**；仅当**触及用户数据/
+  系统核心区且判定为攻击意图**（L3：USB 破解强插、核心区导出、短接取核心数据、密钥区触碰）
+  才**立即摧毁系统（软件熔断）+ 烧毁硬件（硬件熔断）**；官方维修白名单全程不误触发。
+  物理检测走 `aether_hal` 可替换接口（云端故障注入仿真 + 硬件熔断指令仿真锁存，真机 S6 接 GPIO/TEE/eFuse）。
+  软件熔断=系统不可恢复但刷机可重装，硬件永久变砖=真机 eFuse(S6)；二者分开命名，不虚称「永久变砖」。
+  规格与验收见 [`docs/SECURITY-BASELINE.md`](docs/SECURITY-BASELINE.md)；
+  对评估报告的逐条研判见 [`docs/ASSESSMENT-RESPONSE-001.md`](docs/ASSESSMENT-RESPONSE-001.md)。
 
 > 真实产品安全的"反例"与边界：`kernel/secure/`（自研内核侧）与 `kernel/` 整体属**研究性 R&D**，
 > 经审计有 V1–V17 多项缺陷（用户态可越权读写内核、坏指针即停机、任务间无隔离），**不代表产品安全**，
@@ -65,7 +74,7 @@ AetherOS 是一套**基于 Linux 内核的移动操作系统（手机 OS），�
 | --- | --- | --- |
 | `kernel/` | **自研 x86_64 内核（R&D 研究性，非产品内核）**：Multiboot1 引导、IA-32e 长模式、4 级分页、驱动、系统调用、ring3；仅作从零学 OS 的练习 | **研究性代码**：能真机开机/分页/ring3，但经审计 V1–V17 多项安全缺陷，**不代表产品安全能力** |
 | `guest/` | 复用的自研用户态上层：init、合成器、渲染/字体/图标、桌面与系统应用、参数源 `aether-tokens.h` | 可复用，正按接口层解耦 |
-| `secure/` | **用户态安全整机本体（产品安全核心资产）**：密码学基座、五区隔离存储、认证引擎、加密保险库、自毁引擎、防篡改审计链(密钥绑定 HMAC)、完整性、TEE 密钥锚点、设备自证、**物理安全 HAL**、**安全锁定/熔断模式**、整机 CLI 与全套自测 | 已跑通（179/0 自测 + OpenSSL 4/4 交叉验证） |
+| `secure/` | **用户态安全整机本体（产品安全核心资产）**：密码学基座、五区隔离存储、认证引擎、加密保险库、自毁引擎、防篡改审计链(密钥绑定 HMAC)、完整性、TEE 密钥锚点、设备自证、**物理安全 HAL**、**安全锁定/熔断模式（攻击意图分级 + 软件/硬件熔断）**、整机 CLI 与全套自测 | 已跑通（252/0 自测 + OpenSSL 4/4 交叉验证） |
 | `l2/` | **L2 硬件接口层**：十五域统一接口、仿真实现、接口自测 | 本阶段在建 |
 | `tools/` | 基线采集、机检门禁、检测器、内核 QEMU 驱动/门禁 | 本阶段在建 |
 | `scripts/` | 多种一键操作（构建/启动/关闭/重建/跑测/取证、内核、安全整机） | 本阶段在建 |
@@ -87,16 +96,21 @@ AetherOS 是一套**基于 Linux 内核的移动操作系统（手机 OS），�
 | S5 稳定与性能 | 长稳、六类异常自动发现、性能可对比 | **未开始** |
 | S6 真机移植 | 换实现层上真机 / 树莓派 | **未开始** |
 
-**两套安全子系统均已跑通：**
-- **内核态**（`kernel/secure/`）：随自研内核启动，ring3 用户态经 `int 0x80` 完成认证/保险库/
-  自毁，演示「输错 3 次 → 抹除全部用户数据 → 系统完好」并生成可离线校验的销毁证明。
-  证据见 `evidence/round-003/`，报告见 `docs/04-KERNEL-REPORT.md`。
-- **用户态整机本体**（`secure/`）：81 项自测全绿、OpenSSL 密码学交叉验证 4/4 一致，
-  完整演示「输错 3 次 → 抹除全部用户数据 → 系统完好可再用」并生成可离线校验的销毁证明。
-  证据见 `evidence/round-002/`，报告见 `docs/02-SECURE-REPORT.md`。
+**产品安全资产（唯一）：用户态安全整机本体 `secure/`**
+- **252 项自测全绿 / 0 FAIL** + OpenSSL 密码学交叉验证 4/4 一致（SHA-256/HMAC/PBKDF2/ChaCha20）。
+- 已落地：认证 / 加密保险库 / 输错达阈值抹除全部用户数据（系统本体保留）/ 胁迫口令 /
+  防篡改审计链(HMAC) / 完整性自检 / TEE 密钥锚点 / 设备自证 / 首启强设零存储专用密码 /
+  **安全锁定熔断模式（按攻击意图分级 + 软件/硬件熔断）**。
+- 证据见 `evidence/round-002/`（基础）、`evidence/round-004/`（熔断首版）、
+  `evidence/round-005/`（分级判据）；规格见 `docs/SECURITY-BASELINE.md`。
 
-两套安全子系统与 S1–S6 分阶段验收正交，**不替代**图形桌面/软键盘等未开始项；纯软件模拟、
-无 GUI 桌面、无真机 TEE、安卓兼容层未接入等边界如实保留。
+> ⚠️ **`kernel/secure/`（自研内核侧）不是产品安全子系统**。它随**研究性 R&D 自研 x86_64
+> 内核**启动，经漏洞清单 V1–V17 审计有缺陷（用户态可越权读写内核、坏指针即停机、任务间无隔离），
+> **不代表产品安全能力**。产品真实内核是 **Linux**，产品安全以 `secure/` 为准（见 AGENTS.md / V2）。
+> `evidence/round-003/` 与 `docs/04-KERNEL-REPORT.md` 是 R&D 轮次留痕，不作产品验收依据。
+
+安全子系统与 S1–S6 分阶段验收正交，**不替代**图形桌面/软键盘等未开始项；纯软件模拟、
+无 GUI 桌面、无真机 TEE、`secure/` 仍是本机 CLI 非随系统服务、安卓兼容层未接入等边界如实保留。
 
 已有的自研上层（`guest/`）此前在 QEMU TCG 上达成过连续帧变化与自检通过，但那属于
 **旧 APK 套壳口径**下的证据，不作为 v2 双轨验收证据，需按新口径重新取证。
@@ -115,13 +129,13 @@ scripts/aether.sh rebuild     # 清干净重来
 scripts/aether.sh test        # 全套自测 + 五门机检，输出通过/失败清单
 scripts/aether.sh evidence    # 截帧、导出状态与日志
 
-# 安全整机：一键编译 + 81 项自测 + OpenSSL 交叉验证 + 整机演示 + 导出证据（含界面图）
+# 安全整机：一键编译 + 252 项自测 + OpenSSL 交叉验证 + 整机演示 + 导出证据（含界面图）
 scripts/secure.sh all
-scripts/secure.sh shell       # 进入交互式整机 shell（init/unlock/put/panic/audit...）
+scripts/secure.sh shell       # 进入交互式整机 shell（init/unlock/put/panic/audit/ld-*/...）
 
-# 自研内核：编译 + QEMU TCG 真启动 + ring3 安全 demo 闭环 + 真实帧缓冲取证 + 断言
+# R&D 自研内核（研究性，非产品内核）：编译 + QEMU TCG 启动 + ring3 demo + 帧缓冲取证 + 断言
 scripts/kernel.sh build       # 编译内核（freestanding -Werror）+ ring3 init + initrd + 虚拟盘
-scripts/kernel.sh test        # QEMU TCG 真启动，自动交互测试 + 真实帧缓冲取证 + 34 项断言
+scripts/kernel.sh test        # QEMU TCG 软件模拟启动，自动交互测试 + 帧缓冲取证 + 37 项断言
 scripts/kernel.sh gate        # 内核门禁六门机检（构建/密码学/隔离/参数单一源/可复现/Multiboot）
 ```
 
@@ -140,16 +154,17 @@ scripts/kernel.sh gate        # 内核门禁六门机检（构建/密码学/隔�
 
 | 文档 | 内容 |
 | --- | --- |
-| [`docs/00-BASELINE.md`](docs/00-BASELINE.md) | 本机实测环境基线、测量方法、与参考环境差异 |
+| [`docs/SYSTEM-BLUEPRINT.md`](docs/SYSTEM-BLUEPRINT.md) | **系统蓝图（单一真相源）**：要构建什么系统、整体思路、八层分层、双轨、目录地图、真实状态、阶段路线、诚实边界、文档地图 |
+| [`docs/ASSESSMENT-RESPONSE-001.md`](docs/ASSESSMENT-RESPONSE-001.md) | 对《系统评估报告 2026-11-14》V1–V17 / §4 / §5 逐条采纳·修正采纳·驳回 + 依据（含对象错位纠正） |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | 八层架构、双轨、十五域接口、机检门禁、阶段定义 |
-| [`docs/SECURITY.md`](docs/SECURITY.md) | **安全系统设计**：威胁模型、四区隔离、自毁引擎、14 项特性、边界 |
-| [`docs/SECURITY-BASELINE.md`](docs/SECURITY-BASELINE.md) | **安全设计基线**：口号、三档数据保护、H1–H8 加固、安全锁定/熔断模式完整规格（零存储专用密码/10秒冷却/组合键/物理熔断）、逐条验收口径 |
-| [`docs/KERNEL.md`](docs/KERNEL.md) | **自研 x86_64 内核**：架构、引导链坑、系统调用、内核态安全、边界 |
-| [`docs/03-KERNEL-STUDY.md`](docs/03-KERNEL-STUDY.md) | 第三轮内核学习：开源 OS 教程调研与取舍 |
-| [`docs/04-KERNEL-REPORT.md`](docs/04-KERNEL-REPORT.md) | 第四轮内核报告：ring3 安全 demo 真机闭环 + 4 个 bug 四件套 |
+| [`docs/SECURITY-BASELINE.md`](docs/SECURITY-BASELINE.md) | **安全设计基线**：口号、威胁模型、三档数据保护、H1–H8 加固、安全锁定/熔断模式完整规格（零存储专用密码/10秒冷却/组合键/**攻击意图分级 + 软件/硬件熔断**）、逐条验收口径 |
+| [`docs/README.md`](docs/README.md) | 文档地图（当前有效规范 vs 历史留痕） |
+| 历史留痕（如实记录当时状态，不作当前验收依据）： | |
+| [`docs/SECURITY.md`](docs/SECURITY.md) | 旧版安全系统设计（威胁模型、四区隔离、自毁引擎、14 项特性） |
+| [`docs/00-BASELINE.md`](docs/00-BASELINE.md) | 本机实测环境基线 |
 | [`docs/01-STAGE-REPORT.md`](docs/01-STAGE-REPORT.md) | 第一轮 S1/S2 地基阶段报告 |
 | [`docs/02-SECURE-REPORT.md`](docs/02-SECURE-REPORT.md) | 第二轮安全整机阶段报告（四件套 + 缺陷清单） |
-| [`docs/README.md`](docs/README.md) | 文档索引 |
+| [`docs/KERNEL.md`](docs/KERNEL.md) / [`docs/03-KERNEL-STUDY.md`](docs/03-KERNEL-STUDY.md) / [`docs/04-KERNEL-REPORT.md`](docs/04-KERNEL-REPORT.md) | R&D 自研 x86_64 内核（非产品内核）的学习/研究/轮次报告 |
 | [`guest/OPENSOURCE-ATTRIBUTION.md`](guest/OPENSOURCE-ATTRIBUTION.md) | 图标与第三方资产归属、许可证、采用理由 |
 
 ## 开源归属
