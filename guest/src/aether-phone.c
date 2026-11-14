@@ -741,14 +741,32 @@ void aether_desktop_init(int w, int h)
 static int hit(int lx, int ly, int x, int y, int w, int h)
 { return aether_ui_hit(lx, ly, x, y, w, h); }
 
+/* 电量遥测覆盖（debug/取证用）：>=0 时直接作为显示值；<0 表示「未注入」。
+ * 真实设备上由下方 sysfs 电源节点提供；无电源节点（如 QEMU）返回 -1 表示「无源」。 */
+static int g_battery_override = -1;
+
 static int battery_capacity(void)
 {
-    int cap = 100;
+    if (g_battery_override >= 0)
+        return g_battery_override;
+    int cap = -1;
     FILE *f = fopen("/sys/class/power_supply/BAT0/capacity", "r");
     if (!f) f = fopen("/sys/class/power_supply/BAT1/capacity", "r");
-    if (f) { if (fscanf(f, "%d", &cap) != 1) cap = 100; fclose(f); }
-    if (cap < 0) cap = 100; if (cap > 100) cap = 100;
+    if (f) { if (fscanf(f, "%d", &cap) != 1) cap = -1; fclose(f); }
+    if (cap > 100) cap = 100;
+    /* cap 仍为 -1：设备无可用电源节点（真机缺电池/基带仿真），诚实地「无源」而非假满电 */
     return cap;
+}
+
+/* 电量显示文本：无源时「未就绪」，否则「N%」。供状态栏/锁屏页脚/通知统一调用。 */
+static const char *battery_pct_text(char *out, int sz)
+{
+    int c = battery_capacity();
+    if (c < 0)
+        snprintf(out, sz, "未就绪");
+    else
+        snprintf(out, sz, "%d%%", c);
+    return out;
 }
 
 /* 应用图标磁贴：Lucide 线性符号 + 超椭圆玻璃底，视觉重量全系统一致 */
@@ -789,11 +807,12 @@ static void draw_status_bar(const char *clock)
     /* 隐私指示（5.7 / 5.19）：相机麦克风绿点、定位橙点，与灵动岛同色同义 */
     rx -= aether_island_privacy_render(rx, iy, is, g_theme) + 4;
     /* 电量 */
-    char cb[8]; snprintf(cb, sizeof cb, "%d", battery_capacity());
+    char cb[16]; battery_pct_text(cb, sizeof cb);
     int cw = aether_text_width(cb);
     rx -= cw; aether_draw_text_utf8_sized(rx, text_y, cb, TK_T_COMPAT, P_TEXT);
     rx -= is + 4;
-    aether_draw_icon(battery_capacity() < 20 ? AE_ICON_BATTERY_LOW : AE_ICON_BATTERY_FULL,
+    int bc = battery_capacity();
+    aether_draw_icon(bc < 0 ? AE_ICON_BATTERY_LOW : (bc < 20 ? AE_ICON_BATTERY_LOW : AE_ICON_BATTERY_FULL),
                      rx, iy, is, ic);
     rx -= is + 6;
     if (aether_sys_get(SYS_BT))   { aether_draw_icon(AE_ICON_BLUETOOTH, rx, iy, is, ic); rx -= is + 6; }
@@ -1344,7 +1363,8 @@ static void draw_aod(void)
     aether_draw_text_utf8(g_w / 2 - dw / 2, g_h * 38 / 100 + fs + 14, date, dim);
     /* 通知数量 + 电量 */
     int n = aether_desktop_notif_count();
-    char foot[64]; snprintf(foot, sizeof foot, "%d%%  ·  %d 条通知", battery_capacity(), n);
+    char btxt[16]; battery_pct_text(btxt, sizeof btxt);
+    char foot[64]; snprintf(foot, sizeof foot, "%s  ·  %d 条通知", btxt, n);
     int fw = aether_text_width_utf8(foot);
     aether_draw_text_utf8(g_w / 2 - fw / 2, g_h * 38 / 100 + fs + 50, foot, dim);
     /* 未读通知：极低亮度图标，数量受控 */
@@ -1597,7 +1617,8 @@ static void draw_notif_center(void)
     char bodies[3][96];
     snprintf(bodies[0], 96, "AetherOS 手机版启动完成，桌面可用");
     snprintf(bodies[1], 96, "设备安全状态正常");
-    snprintf(bodies[2], 96, "当前电量 %d%%", battery_capacity());
+    char btxt3[16]; battery_pct_text(btxt3, sizeof btxt3);
+    snprintf(bodies[2], 96, "当前电量 %s", btxt3);
 
     int y = STATUS_H + 52;
     int shown = 0;
@@ -2638,6 +2659,19 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
 {
     char cmd[32];
     if (sscanf(line, "%31s", cmd) != 1) { snprintf(reply, sz, "{\"ok\":false}\n"); return; }
+    /* 只读：返回当前本地时间（锁屏显示的同款），用于门禁验证时区配置生效 */
+    if (!strcmp(cmd, "clock")) {
+        time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
+        snprintf(reply, sz, "{\"clock\":\"%02d:%02d:%02d\"}\n", tm.tm_hour, tm.tm_min, tm.tm_sec);
+        return;
+    }
+    /* 电量显示文本（机器可读，用于门禁断言『数据源绑定真实电源节点而非写死 100%』）：
+     * 无可用电源节点时『未就绪』，覆盖或 sysfs 命中时『N%』。 */
+    if (!strcmp(cmd, "batinfo")) {
+        char btxt[16]; battery_pct_text(btxt, sizeof btxt);
+        snprintf(reply, sz, "{\"battery_text\":\"%s\"}\n", btxt);
+        return;
+    }
     if (!strcmp(cmd, "state")) {
         aether_desktop_state(reply, sz);
         size_t L = strlen(reply); reply[L] = '\n'; reply[L + 1] = 0;
@@ -2674,6 +2708,15 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
         g_panel = 1; g_drawer = 0; g_cc_detail = -1;
         notif_set_stage(v);
         snprintf(reply, sz, "{\"ok\":true,\"stage\":%d,\"h\":%d}\n", v, g_notif_h);
+        return;
+    }
+    /* 电量遥测注入（debug/取证）：仅用于证明状态栏绑定真实数据源而非写死 100%。
+     * 真实设备由 sysfs 电源节点提供；此覆盖值不影响任何安全语义。 */
+    if (!strcmp(cmd, "battery")) {
+        int v = -1; sscanf(line, "%*s %d", &v);
+        if (v < 0) v = 0; if (v > 100) v = 100;
+        g_battery_override = v;
+        snprintf(reply, sz, "{\"ok\":true,\"battery\":%d}\n", v);
         return;
     }
     /* P1 取证：控制中心二级面板（真机路径为长按磁贴 400ms） */

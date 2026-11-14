@@ -29,13 +29,24 @@ mkdir -p "$EVID"
 : > "$LOG"
 rm -f "$QMP"
 
+# 门禁/自动化模式（AETHER_GATE=1）：开启合成器 debug TCP 输入通道（:9230）与
+# 用户态网络转发，使主机可经真实输入路径（与物理触摸同一 handler）驱动设备。
+# 生产启动不设该变量，无网络、无 TCP 暴露。
+APPEND_EXTRA=""
+DEV_EXTRA=""
+if [ "${AETHER_GATE:-0}" = "1" ]; then
+    APPEND_EXTRA="aether.input_tcp=1"
+    DEV_EXTRA="-device virtio-net-pci,netdev=n0 -netdev user,id=n0,hostfwd=tcp::9230-:9230"
+fi
+
 echo "[run] QEMU aarch64 TCG 冷启动（virtio-gpu）-> $LOG"
 timeout "$TIMEOUT" qemu-system-aarch64 \
     -M virt -cpu cortex-a57 -m 512M -smp 2 \
     -kernel "$IMAGE" \
     -drive "file=$ROOTFS,format=raw,if=virtio" \
-    -append "root=/dev/vda rw console=ttyAMA0 init=/init panic=5 loglevel=7 video=720x1280" \
+    -append "root=/dev/vda rw console=ttyAMA0 init=/init panic=5 loglevel=7 video=720x1280 $APPEND_EXTRA" \
     -device virtio-gpu-pci \
+    $DEV_EXTRA \
     -display none -serial "file:$LOG" -monitor none -no-reboot \
     -qmp "unix:$QMP,server=on,wait=off" \
     > "$EVID/qemu.stdout.txt" 2> "$EVID/qemu.stderr.txt" &

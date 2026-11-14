@@ -25,6 +25,7 @@
 #include "aether-island.h"
 
 #include <arpa/inet.h>
+#include <netinet/in.h>
 #include <dirent.h>
 #include <errno.h>
 #include <execinfo.h>
@@ -155,6 +156,9 @@ struct input_dev {
 };
 static struct input_dev g_in[8];
 static int g_nin = 0;
+/* debug 态 TCP 输入通道（仅 AETHER_INPUT_TCP=1 时启用）：用于门禁以真实输入路径
+ * （与物理触摸同一 handler）驱动设备。生产启动不设该 env，无 TCP、无网络暴露。 */
+static int g_tfd = -1;
 
 static int has_type(int fd, unsigned long type)
 {
@@ -428,6 +432,28 @@ int main(void)
     listen(sfd, 8);
     chmod(COMP_SOCK, 0666);
 
+    /* debug 态 TCP 输入通道：仅在 AETHER_INPUT_TCP=1 时启用（门禁/自动化用）。
+     * 复用与 AF_UNIX 完全相同的命令协议与 UI handler，保证测试路径 = 用户点击路径。 */
+    if (getenv("AETHER_INPUT_TCP")) {
+        int tfd = socket(AF_INET, SOCK_STREAM, 0);
+        int one = 1;
+        struct sockaddr_in taddr;
+        memset(&taddr, 0, sizeof taddr);
+        taddr.sin_family = AF_INET;
+        taddr.sin_port = htons(9230);
+        taddr.sin_addr.s_addr = INADDR_ANY;
+        if (tfd >= 0) {
+            setsockopt(tfd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+            if (bind(tfd, (struct sockaddr *)&taddr, sizeof taddr) == 0
+                && listen(tfd, 8) == 0) {
+                g_tfd = tfd;
+                aether_log("comp", "debug TCP input on :9230 (AETHER_INPUT_TCP)");
+            } else {
+                close(tfd);
+            }
+        }
+    }
+
     aether_log("comp", "serving on %s  (%ux%u)", COMP_SOCK, g_disp.width, g_disp.height);
 
     int dirty = 1;
@@ -444,6 +470,11 @@ int main(void)
         pfds[n].fd = sfd;
         pfds[n].events = POLLIN;
         n++;
+        if (g_tfd >= 0 && n < MAX_FDS) {
+            pfds[n].fd = g_tfd;
+            pfds[n].events = POLLIN;
+            n++;
+        }
         for (int i = 0; i < g_nin; i++) {
             if (g_in[i].fd >= 0 && n < MAX_FDS) {
                 pfds[n].fd = g_in[i].fd;
@@ -479,10 +510,13 @@ int main(void)
             }
         }
 
-        /* IPC 新连接 */
+        /* IPC 新连接（AF_UNIX 与 debug TCP 共用同一处理函数） */
         for (int i = 0; i < n; i++) {
-            if (pfds[i].fd == sfd && (pfds[i].revents & POLLIN)) {
-                int cfd = accept(sfd, NULL, NULL);
+            int lfd = -1;
+            if (pfds[i].fd == sfd && (pfds[i].revents & POLLIN)) lfd = sfd;
+            else if (g_tfd >= 0 && pfds[i].fd == g_tfd && (pfds[i].revents & POLLIN)) lfd = g_tfd;
+            if (lfd >= 0) {
+                int cfd = accept(lfd, NULL, NULL);
                 if (cfd >= 0) {
                     handle_client(cfd);
                     close(cfd);

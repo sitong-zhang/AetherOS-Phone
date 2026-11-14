@@ -55,6 +55,9 @@ bash boot/build.sh            # 5 步：内核 + aarch64 用户态 + 安全引�
 bash boot/run-qemu.sh         # QEMU TCG 冷启动，串口日志与真实首帧写到 evidence/（仓库内）
 python3 tools/gate_boot.py    # 开机门禁：逐环节断言串口证据 + 图形帧像素统计（10/10）
 
+# 交互/活体/可读性门禁（真实输入路径驱动设备 + 首帧像素统计；默认读 evidence/round-012）
+AETHER_GATE=1 python3 tools/gate_interact.py   # 启动 gate 模式 QEMU（开启合成器 debug TCP 输入通道）
+
 # 六种一键操作中的 A 轨入口
 bash scripts/aether.sh start --track A
 ```

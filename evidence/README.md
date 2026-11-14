@@ -34,6 +34,9 @@ python3 tools/gate_boot.py
 # 接口层（十五域 HAL）五门静态机检
 python3 tools/gate_l2.py
 
+# 交互/活体/可读性门禁（真实输入路径驱动设备 + 首帧像素统计；默认读 evidence/round-012）
+python3 tools/gate_interact.py
+
 # 安全整机全套自测
 bash scripts/secure.sh test
 ```
@@ -47,6 +50,7 @@ bash scripts/secure.sh test
 | --- | --- | --- |
 | `tools/gate_boot.py` | `evidence/round-009` | 打印可复现路径，返回非零，不崩溃、不虚报 |
 | `tools/gate_l2.py` | `evidence/round-l2` | 输出机检 JSON；纯静态分析，不读外部证据 |
+| `tools/gate_interact.py` | `evidence/round-012` | 交互/活体/可读性机检；缺证据时打印复现路径、返回非零、不崩溃 |
 | `tools/render_secure_ui.py` | `evidence/round-002` | 界面图为设计稿渲染产物，打印复现方式，返回非零 |
 
 ## 各轮证据清单（本地归档）
@@ -61,5 +65,6 @@ bash scripts/secure.sh test
 | round-009 | A 轨真实图形首帧 + 安全引擎随开机自检 | `first-frame.png`、`boot-serial.log`、`gate_boot.json`(10/10)；物理帧经内核 `video=` 覆盖为**竖屏 720x1280 1:1**（原 1280x800 横屏 letterbox 已弃） |
 | round-010 | 复检 01:41（证据可复现化 + N2 钉死 + 文档边界） | `gate_boot.json`、`verify-rc.txt` |
 | round-011 | 复检 02:23 实测报告（B1 分辨率确定性 + B2 文字 1:1 清晰 + B3 时区 + B4/B5 构建文档） | `first-frame.png`(720x1280, 文字锐度较旧管线 +11.8×)、`boot-serial.log`(`localtime tz=CST-8`)、`gate_boot.json`(10/10) |
+| round-012 | 复检 04:11 报告（R1 文字可读 + R2 界面在动 + R3 时区可配 + R4 电量真源 + R5 真实触摸解锁） | `gate_interact.json`(5/5)、`r1_lock.png`(锐度 476)、`r5_before/after.png`(点击解锁帧差 31555)、`r2a/r2b.png`(时钟秒位刷新) |
 
 状态提升一律由上述脚本现场取证，不凭文字陈述。
