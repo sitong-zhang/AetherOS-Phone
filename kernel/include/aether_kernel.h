@@ -119,18 +119,43 @@ const char *ksec_last_receipt(void);
 uint64_t ksec_sys_digest(void);       /* 系统区（内核代码）摘要，擦除前后比对 */
 void ksec_idle_check(void);
 
-/* ---- 进程 / ELF / 系统调用 ---- */
+/* ---- 进程 / 调度 / ELF / 系统调用 ---- */
+#define K_MAX_PROC 8
+/* 进程控制块：内核态保存的完整上下文（通用寄存器 + iret 帧），切换即整帧换出/换入 */
+typedef struct {
+    int      pid;              /* 1..K_MAX_PROC，0 = 空闲槽 */
+    int      state;            /* 0 未用 1 READY/RUNNING 2 EXITED */
+    int      quantum;          /* 剩余时间片（PIT 节拍） */
+    const char *name;
+    regs_t   ctx;              /* 切换时被整体复制进/出中断栈帧 */
+} proc_t;
+
+int  elf_load(const void *image, size_t len, uint64_t load_vaddr,
+              uint64_t stack_top, uint64_t stack_bytes,
+              char *msg, size_t n, uint64_t *out_entry, uint64_t *out_stack);
 int  elf_load_and_run(const void *image, size_t len, char *msg, size_t n);
+proc_t *proc_create(const void *image, size_t len, uint64_t load_vaddr,
+                    uint64_t stack_top, uint64_t stack_bytes,
+                    const char *name, char *msg, size_t n);
+void proc_init(void);
+void proc_start_first(void);          /* 设置 g_current=init 并由 init 首次进入 ring3 */
+void sched_tick(regs_t *r);           /* PIT 中断中调用：保存当前、轮转下一个 */
+void sched_exit_task(regs_t *r);       /* SYS_EXIT：init 退出=整内核收尾；其余切换走 */
+int  proc_count_ready(void);
 void syscall_init(void);
 int  syscall_dispatch(regs_t *r);
 void task_enter_user(uint64_t entry, uint64_t user_rsp);  /* isr.S，iretq 切 ring3 */
+
+extern proc_t *g_current;             /* 当前运行任务（中断上下文可读） */
 
 /* ---- 内核主入口 / 用户态退出收尾 ---- */
 void K_NORETURN kmain(uint32_t magic, uint32_t mbi_phys);
 void K_NORETURN kernel_finalize(int code);   /* SYS_EXIT 落点：打印总结并停机，不返回 */
 
-/* ---- 嵌入的用户态 init 镜像（build.sh 由 objcopy 生成）---- */
+/* ---- 嵌入的用户态 init / 任务2 镜像（build.sh 由 objcopy 生成）---- */
 extern const uint8_t _binary_init_elf_start[];
 extern const uint8_t _binary_init_elf_end[];
+extern const uint8_t _binary_task2_elf_start[];
+extern const uint8_t _binary_task2_elf_end[];
 
 #endif /* AETHER_KERNEL_H */

@@ -65,8 +65,15 @@ do_build() {
     ( cd "$OUT" && objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
         init.elf init_blob.o ) || die "initrd 嵌入"
 
+    log "编译用户态 task2（第二 ring3 任务，演示抢占式多任务 @ 6 MiB）"
+    $CC $CFLAGS "$K/user/task2.c" -o "$OUT/user_task2.o" || die "用户态 task2.c 编译"
+    ld -n -T "$K/user/user2.ld" -z max-page-size=0x1000 \
+        "$OUT/user_start.o" "$OUT/user_task2.o" -o "$OUT/task2.elf" || die "task2 链接"
+    ( cd "$OUT" && objcopy -I binary -O elf64-x86-64 -B i386:x86-64 \
+        task2.elf task2_blob.o ) || die "task2 嵌入"
+
     log "编译内核 C（freestanding, -Werror）"
-    local objs=("$OUT/boot.o" "$OUT/isr.o" "$OUT/init_blob.o")
+    local objs=("$OUT/boot.o" "$OUT/isr.o" "$OUT/init_blob.o" "$OUT/task2_blob.o")
     for f in "$K"/core/*.c "$K"/secure/*.c; do
         local o="$OUT/$(basename "${f%.c}").o"
         $CC $CFLAGS "$f" -o "$o" || die "编译失败: $f"
@@ -80,9 +87,9 @@ do_build() {
 
     make_disk
     log "产物："
-    ls -lh "$OUT/aether-kernel.elf" "$OUT/aether-kernel.boot" "$OUT/init.elf" "$OUT/aether-data.img"
+    ls -lh "$OUT/aether-kernel.elf" "$OUT/aether-kernel.boot" "$OUT/init.elf" "$OUT/task2.elf" "$OUT/aether-data.img"
     # 可复现哈希（只记录本次构建产物）
-    ( cd "$OUT" && sha256sum aether-kernel.elf aether-kernel.boot init.elf > build-hashes.txt )
+    ( cd "$OUT" && sha256sum aether-kernel.elf aether-kernel.boot init.elf task2.elf > build-hashes.txt )
     log "build OK"
 }
 

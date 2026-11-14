@@ -82,11 +82,19 @@ int syscall_dispatch(regs_t *r) {
         return ksec_selftest((char *)(uintptr_t)r->rdi, (uint32_t)r->rsi);
     case K_SYS_BOOT_MAGIC:
         return (int)K_BUILD_MAGIC;
+    case K_SYS_GETPID:
+        return g_current ? g_current->pid : 0;
+    case K_SYS_YIELD:
+        /* 主动让出：返回 0，实际切换仍由时钟抢占驱动（见 proc.c sched_tick） */
+        return 0;
     case K_SYS_EXIT:
-        /* 用户态主动退出：不能 return（iretq 会回用户态），
-         * 直接跳进内核收尾：打印最终状态、可选截图点、QEMU 退出。 */
-        kernel_finalize((int)r->rdi);
+        /* 用户态主动退出：init 退出 = 整内核收尾；其它任务退出 = 标记 EXITED 并切换。
+         * sched_exit_task 对 init 走 kernel_finalize(不返回)；对其它任务改写返回帧后
+         * 回到这里，需 break 避免 fallthrough（此时 r 已被切换为下一任务）。 */
+        sched_exit_task(r);
+        break;
     default:
         return -255;
     }
+    return 0;
 }

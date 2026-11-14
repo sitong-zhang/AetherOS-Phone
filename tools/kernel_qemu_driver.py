@@ -69,6 +69,9 @@ REQUIRED = [x for x in REQUIRED if x != "AETHER_RING3"] + [
     "DEMO_DONE=1  ALL STAGES PASSED",
     "SHELL READY",
     "KERNEL_BOOT_FAILS=0 SELFTEST_DONE=1",
+    "PROC: created 2 ring3 task(s)",
+    "TASK2 PID=2 tick=",
+    "TASK2 DONE",
 ]
 
 # 交互注入命令 -> 期望回显（证明输入链路 + ring3 再次进 ring0）

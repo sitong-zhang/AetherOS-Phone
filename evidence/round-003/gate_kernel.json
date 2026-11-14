@@ -37,6 +37,6 @@
   ],
   "notes": [
     "init.elf entry=0x400000 exec=True",
-    "kernel tree sha256=6fc12a96df4771aa..."
+    "kernel tree sha256=196c07eb6f1cbbb9..."
   ]
 }

@@ -75,8 +75,13 @@ static void vga_putc(char c) {
     if (g_row >= K_VGA_ROWS) { vga_scroll(); g_row = K_VGA_ROWS - 1; }
 }
 void con_putc(char c) {
+    unsigned long f;
+    /* 抢占式多任务下，逐个字符发射期间关中断，避免两个任务的串口/VGA 写交错
+     * 破坏共享的光标(g_col/g_row)状态导致画面乱码。单 CPU 下 cli 即足以互斥。 */
+    __asm__ volatile("pushfq; popq %0; cli" : "=r"(f));
     serial_putc(c);
     if (g_ready) { vga_putc(c); vga_cursor(); }
+    __asm__ volatile("pushq %0; popfq" :: "r"(f));
 }
 int con_write(const char *s) { int n = 0; while (s[n]) { con_putc(s[n]); n++; } return n; }
 int con_printf(const char *fmt, ...) {

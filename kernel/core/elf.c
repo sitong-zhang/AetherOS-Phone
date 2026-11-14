@@ -24,7 +24,14 @@ typedef struct K_PACKED {
 #define ET_EXEC 2u
 #define EM_X86_64 62u
 
-int elf_load_and_run(const void *image, size_t len, char *msg, size_t n) {
+/*
+ * 把 ELF 加载进当前页表（共享内核页表）并映射独立的用户栈，返回入口与栈顶。
+ * 不进入 ring3 —— 由调用方决定何时/是否进入（单进程直进，或多进程交调度器）。
+ */
+int elf_load(const void *image, size_t len, uint64_t load_vaddr,
+             uint64_t stack_top, uint64_t stack_bytes,
+             char *msg, size_t n, uint64_t *out_entry, uint64_t *out_stack) {
+    (void)load_vaddr;   /* ELF 段自带正确 vaddr（init@0x400000 / task2@0x600000），此处 identity 映射 */
     if (!image || len < sizeof(elf64_ehdr_t)) {
         return ksnprintf(msg, n, "ELF FAIL: image too small\n"), -1;
     }
@@ -62,19 +69,19 @@ int elf_load_and_run(const void *image, size_t len, char *msg, size_t n) {
             kmemset((void *)(uintptr_t)(ph.p_vaddr + ph.p_filesz), 0,
                     (size_t)(ph.p_memsz - ph.p_filesz));
     }
-    /* 用户栈：单独映射，U/S=1 */
-    uint64_t stack_bottom = K_USER_STACK_TOP - K_USER_STACK_BYTES;
-    for (uint64_t p = stack_bottom; p < K_USER_STACK_TOP; p += K_PAGE_SIZE)
+    /* 用户栈：单独映射，U/S=1（栈顶须低于 load_vaddr，避免与代码段重叠） */
+    uint64_t stack_bottom = stack_top - stack_bytes;
+    for (uint64_t p = stack_bottom; p < stack_top; p += K_PAGE_SIZE)
         if (vmm_map(p, p, 0x02 | 0x04) != 0)
             return ksnprintf(msg, n, "ELF FAIL: stack map failed\n"), -8;
     /* 在用户栈顶放一个伪 argc=0 帧，保持 SysV ABI 栈对齐 */
-    uint64_t *usp = (uint64_t *)(K_USER_STACK_TOP - 16);
+    uint64_t *usp = (uint64_t *)(stack_top - 16);
     usp[0] = 0; usp[1] = 0;
     (void)lo; (void)hi;
     ksnprintf(msg, n,
-        "ELF OK: entry=0x%x phnum=%u user_range=0x%x..0x%x stack=0x%x -> entering ring3\n",
+        "ELF OK: entry=0x%x phnum=%u user_range=0x%x..0x%x stack=0x%x\n",
         (uint32_t)eh.e_entry, eh.e_phnum, (uint32_t)lo, (uint32_t)hi,
-        (uint32_t)K_USER_STACK_TOP);
+        (uint32_t)stack_top);
     con_write(msg);
     {
         char d[96];
@@ -84,7 +91,18 @@ int elf_load_and_run(const void *image, size_t len, char *msg, size_t n) {
                   (int)(fl & 1), (int)((fl >> 1) & 1), (int)((fl >> 2) & 1));
         con_write(d);
     }
+    *out_entry = eh.e_entry;
+    *out_stack = (uint64_t)(uintptr_t)usp;
+    return 0;
+}
+
+int elf_load_and_run(const void *image, size_t len, char *msg, size_t n) {
+    uint64_t e, s;
+    int rc = elf_load(image, len, K_USER_LOAD_VADDR, K_USER_STACK_TOP,
+                      K_USER_STACK_BYTES, msg, n, &e, &s);
+    if (rc) return rc;
+    con_write("-> entering ring3 (single process)\n");
     k_sti();
-    task_enter_user(eh.e_entry, (uint64_t)(uintptr_t)usp);
+    task_enter_user(e, s);
     return 0;   /* 用户态通过 SYS_EXIT 回到这里（iretq 不返回，实际由独立路径处理） */
 }

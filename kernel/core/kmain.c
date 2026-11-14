@@ -85,11 +85,27 @@ void K_NORETURN kmain(uint32_t magic, uint32_t mbi_phys) {
         kernel_finalize(1);
     }
 
-    /* 用户态 init 镜像：build.sh 用 objcopy 嵌进内核 ELF */
+    /* 用户态镜像：build.sh 用 objcopy 嵌进内核 ELF */
     size_t ilen = (size_t)(_binary_init_elf_end - _binary_init_elf_start);
     CHECK(ilen > 64, "embedded initrd (ring3 ELF image present)");
+
+    /* 抢占式多任务：init(安全 demo) + task2(心跳) 共享内核页表，PIT 时钟轮转 */
     char em[512];
-    (void)elf_load_and_run(_binary_init_elf_start, ilen, em, sizeof em);
+    proc_init();
+    proc_t *p1 = proc_create(_binary_init_elf_start, ilen,
+                             K_USER_LOAD_VADDR, K_USER_STACK_TOP, K_USER_STACK_BYTES,
+                             "init", em, sizeof em);
+    if (!p1) { con_printf("PROC FAIL: %s", em); kernel_finalize(2); }
+    size_t t2len = (size_t)(_binary_task2_elf_end - _binary_task2_elf_start);
+    proc_t *p2 = proc_create(_binary_task2_elf_start, t2len,
+                             K_TASK2_LOAD_VADDR, K_TASK2_STACK_TOP, K_TASK2_STACK_BYTES,
+                             "task2", em, sizeof em);
+    if (!p2) { con_printf("PROC FAIL: %s", em); kernel_finalize(2); }
+    con_printf("PROC: created %d ring3 task(s): init(security-demo) + task2(heartbeat); "
+               "PIT-driven preemptive scheduler\n", proc_count_ready());
+
+    g_current = p1;            /* 首个进入 ring3 的任务 = init（安全 demo） */
+    proc_start_first();        /* 进入 ring3；之后由时钟驱动轮转 */
 
     /* task_enter_user 不会返回；若意外返回即如实报错 */
     con_printf("KERNEL PANIC: returned from ring3 unexpectedly\n");

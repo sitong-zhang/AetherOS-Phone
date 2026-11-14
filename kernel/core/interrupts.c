@@ -123,6 +123,8 @@ void isr_c_handler(regs_t *r) {
         for (;;) { k_cli(); k_hlt(); }
     } else if (v == 0x20) {              /* IRQ0 PIT */
         g_ticks++;
+        /* 用户态被时钟打断时，由抢占式调度器保存当前整帧并轮转下一个任务 */
+        if (g_current && (r->cs & 3) == 3) sched_tick(r);
         pic_eoi(0);
     } else if (v == 0x21) {              /* IRQ1 PS/2 键盘 */
         uint8_t sc = inb(K_PS2_DATA);

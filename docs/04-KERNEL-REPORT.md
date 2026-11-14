@@ -85,3 +85,26 @@
 - 本轮改动文件：`kernel/arch/x86_64/boot.S`、`kernel/arch/x86_64/linker.ld`、`kernel/core/memory.c`、`kernel/core/syscall.c`、`kernel/core/devices.c`、`kernel/core/interrupts.c`（删调试追踪）、`kernel/secure/vault.c`、`tools/kernel_qemu_driver.py`、`tools/gate_kernel.py`、文档。
 - 仓库仍只发 `sitong-zhang/AetherOS-Phone`；token 不入库。
 - 提交信息如实写「ring3 安全 demo 真机闭环 + 4 个内核 bug 修复」。
+
+---
+
+## 7. 后续（本轮新增）：PIT 时钟驱动的抢占式多任务
+
+在「完整操作系统」总纲下，选定内核支柱推进抢占式调度，不破坏已绿的安全 demo 闭环。
+
+**做了什么**
+- 新增 `kernel/core/proc.c`：进程表（`proc_t` 含 pid/state/quantum/name/整帧 `ctx`）+ 轮转调度器。
+  - `sched_tick()`：PIT(100Hz) 中断里调用，**仅当用户态(CS.RPL=3)** 才保存当前整帧、按 `K_SCHED_QUANTUM=4` 节拍轮转下一个 READY 任务；改写中断返回帧 `regs_t` 的 iret 字段，isr 返回即 `iretq` 切到下一任务（厂商式「改写返回帧」上下文切换）。
+  - `sched_exit_task()`：`SYS_EXIT` 落点——init 退出 = 整内核收尾；其余任务标记 EXITED 并切换，不终止内核。
+- 新增 `kernel/user/task2.c` + `kernel/user/user2.ld`：第二个 ring3 心跳任务（@0x600000，独立代码段与用户栈），每 ~80ms 打印 `TASK2 PID=2 tick=.. HEARTBEAT #n`，~0.4s 后打 `TASK2 DONE` 并 `SYS_EXIT`。`init`（安全 demo）保留为 PID1。
+- `elf.c` 拆分出 `elf_load()`（只映射 ELF + 用户栈、不进 ring3）；`interrupts.c` 在 PIT 处理中接入 `sched_tick()`；`syscall.c` 扩展 `GETPID`/`YIELD`/`EXIT`；`console.c` 加关中断保护 VGA/串口光标，避免抢占下状态交错乱码。
+- `scripts/kernel.sh` 编译/链接/嵌入 task2；`kernel_qemu_driver.py` 断言由 34 增至 37。
+
+**真机验证（不实称）**
+- QEMU TCG 真启动：**37/37 断言全绿**，退出码 33，三轮真实 VGA 帧缓冲取证。
+- 串口实证 init 与 task2 真实交织：`TASK2 PID=2 tick=15 HEARTBEAT #0` 出现在 `SHELL READY` 之前，`#1..#4` 与 shell 命令输出交错，末行 `TASK2 DONE pid=2`。
+- 六门静态机检 **8/8** 全过，内核树可复现 sha256 一致。
+
+**已知边界（如实标注）**
+1. **共享内核页表**：双任务运行在同一套 4 级页表上，各有独立代码段与用户栈，但**任务间无 MMU 地址空间隔离**（隔离为后续阶段）；内核区(U/S=0)任务态不可访问。
+2. 其余边界同 §5（纯软件模拟、无 GUI、无真机 TEE、安卓兼容层未接入）不变。

@@ -61,6 +61,11 @@
 #define K_USER_LOAD_VADDR     0x0000000000400000ull  /* 用户态 ELF 链接基址 4 MiB */
 #define K_USER_STACK_TOP      0x0000000000300000ull  /* 用户栈 3 MiB 向下 */
 #define K_USER_STACK_BYTES    (64u * 1024u)
+/* 第二 ring3 任务（演示抢占式多任务）：独立代码段与栈，共享内核页表 */
+#define K_TASK2_LOAD_VADDR    0x0000000000600000ull  /* 任务2 ELF 链接基址 6 MiB */
+#define K_TASK2_STACK_TOP     0x0000000000500000ull  /* 任务2 栈 5 MiB 向下 */
+#define K_TASK2_STACK_BYTES   (64u * 1024u)
+#define K_SCHED_QUANTUM       4u    /* 每个任务时间片（PIT 节拍，100Hz 下 = 40ms） */
 
 /* ---- 块设备 / 数据区（可擦除） ---- */
 #define K_ATA_IO_BASE         0x01F0u
@@ -109,6 +114,8 @@
 #define K_SYS_SELFTEST        13u  /* (buf,len) -> n */
 #define K_SYS_EXIT            14u  /* (code) -> 不返回 */
 #define K_SYS_BOOT_MAGIC      15u  /* () -> 内核启动魔数，证明出自 ring0 */
+#define K_SYS_GETPID          16u  /* () -> 当前任务 pid */
+#define K_SYS_YIELD           17u  /* () -> 主动让出（仍由时钟抢占驱动切换） */
 
 /* ---- 解锁返回状态 ---- */
 #define K_AUTH_OK             0

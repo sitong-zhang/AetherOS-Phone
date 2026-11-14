@@ -18,13 +18,16 @@ POST PASS  no CPU exception during boot
 
 --- boot self-check summary: 0 failure(s) ---
 POST PASS  embedded initrd (ring3 ELF image present)
-ELF OK: entry=0x400000 phnum=2 user_range=0x400000..0x404120 stack=0x300000 -> entering ring3
+ELF OK: entry=0x400000 phnum=2 user_range=0x400000..0x404120 stack=0x300000
 DIAG PTE(0x400000)=0x400067 P=1 RW=1 US=1
+ELF OK: entry=0x600000 phnum=2 user_range=0x600000..0x602100 stack=0x500000
+DIAG PTE(0x600000)=0x600067 P=1 RW=1 US=1
+PROC: created 2 ring3 task(s): init(security-demo) + task2(heartbeat); PIT-driven preemptive scheduler
 
 === AetherOS ring3 init :: SECURITY DEMO ===
 [1] boot magic via syscall: BOOT_MAGIC_OK (served by ring0 kernel)
 [2] kernel selftest:
-SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=3
+SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=4
 [3] factory provisioning (password + duress password):
 PROVISION_OK
 [4] unlock:
@@ -40,6 +43,7 @@ LOCK_OK
 [8] three wrong passwords (threshold triggers full data destruction):
 DENIED: wrong password (1/3)
 DENIED: wrong password (2/3)
+TASK2 PID=2 tick=15 HEARTBEAT #0
 WIPED: 3 wrong passwords reached threshold 3 -> ALL user data destroyed, SYSTEM INTACT
 [9] wipe receipt + system integrity:
 WIPE_STATUS state=FACTORY fails=0 last_trigger=max-fails-reached last_fails=3 receipt=PRESENT
@@ -50,10 +54,10 @@ WIPE_STATUS state=FACTORY fails=0 last_trigger=max-fails-reached last_fails=3 re
   "max_fails": 3,
   "wipe_passes": 4,
   "vault_sectors": 2048,
-  "volume_hash_before": "8a88ee27e6febdbc216521d93fcec4dab5b62ae01ad1c95615f6d5c55fc0f270",
+  "volume_hash_before": "4582b89596b3d3b329da4639cf20ab899bceb5d1007efc1b6cc5f0ec9e0cb75e",
   "volume_hash_after": "30e14955ebf1352266dc2ff8067e68104607e750abb9d3b36582b8af909fcb58",
   "volume_changed": true,
-  "sys_digest": "7d54b45a9ee5bf5e14cded83fe4724bb1987d07fde1ae2c27f6934aa8b460087",
+  "sys_digest": "9969281409b7615240198b7ba17d198e0e486e2314585faae4fce13c1978c28f",
   "sys_unchanged": true,
   "key_material": "DESTROYED",
   "credentials": "PURGED",
@@ -62,6 +66,7 @@ WIPE_STATUS state=FACTORY fails=0 last_trigger=max-fails-reached last_fails=3 re
 }
 WIPE_RECEIPT_OK sys_unchanged=true
 [10] re-provision after wipe (system survives, reusable):
+TASK2 PID=2 tick=23 HEARTBEAT #1
 OK: unlocked, vault ready
 REINIT_OK
 [11] old data must be unrecoverable:
@@ -71,15 +76,19 @@ DEMO_DONE=1  ALL STAGES PASSED
 
 --- interactive shell ready (status/selftest/list/audit/help/exit) ---
 SHELL READY
+TASK2 PID=2 tick=31 HEARTBEAT #2
 SHELL CMD: status
-AetherOS 1.0.0 (Changming-Aether) | kernel=ring0 | pages=128703/130943 | ticks=18 | faults=0
+AetherOS 1.0.0 (Changming-Aether) | kernel=ring0 | pages=128698/130943 | ticks=35 | faults=0
+TASK2 PID=2 tick=39 HEARTBEAT #3
+TASK2 PID=2 tick=47 HEARTBEAT #4
+TASK2 DONE pid=2
 SHELL CMD: selftest
-SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=53
+SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=66
 SHELL CMD: exit
 SHELL_EXIT
 
 === KERNEL FINALIZE ===
-state=UNLOCKED fails=0 faults=0 ticks=88
-SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=88
+state=UNLOCKED fails=0 faults=0 ticks=101
+SELFTEST crypto_sha256=PASS ata=PASS audit_chain=PASS sys_digest=UNCHANGED faults=0 ticks=101
 KERNEL_BOOT_FAILS=0 SELFTEST_DONE=1
 KERNEL_EXIT_CODE=0

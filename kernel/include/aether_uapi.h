@@ -34,6 +34,8 @@ static inline long u_wipe_status(char *b, long n) { return usyscall(K_SYS_WIPE_S
 static inline long u_audit(char *b, long n) { return usyscall(K_SYS_AUDIT_DUMP,(long)b,n,0,0,0); }
 static inline long u_selftest(char *b, long n) { return usyscall(K_SYS_SELFTEST,(long)b,n,0,0,0); }
 static inline long u_read(char *b, long n) { return usyscall(K_SYS_READ,(long)b,n,0,0,0); }
+static inline long u_getpid(void) { return usyscall(K_SYS_GETPID,0,0,0,0,0); }
+static inline long u_yield(void) { return usyscall(K_SYS_YIELD,0,0,0,0,0); }
 
 /* 用户态极简字符串工具（不依赖 libc） */
 static inline unsigned long ustrlen(const char *s) { unsigned long n=0; while(s[n])n++; return n; }
