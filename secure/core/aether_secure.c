@@ -12,6 +12,7 @@
  */
 #define _GNU_SOURCE
 #include "aether_secure.h"
+#include "aether_tee.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -23,7 +24,6 @@
 #define AUTH_FILE       "auth.state"
 #define KEY_FILE        "vault.key"
 #define VOL_FILE        "vault.img"
-#define DEVICE_KEY_FILE "device.key"
 #define CHAIN_FILE      "chain.log"
 #define AUTH_MAGIC      0x41455448u   /* "AETH" */
 #define AUTH_VER        1u
@@ -58,6 +58,7 @@ struct ae_secure {
     uint8_t         dek[AE_KEY_LEN];
     int             dek_valid;
     int             tampered;
+    ae_tee_backend_t tee_backend;   /* 密钥驻留后端：当前软件，真机为硬件 */
     time_t          last_activity;
     char            last_receipt[256];
 };
@@ -67,11 +68,9 @@ static void hex_of(const uint8_t *b, char out[65]) { ae_hex(b, AE_SHA256_LEN, ou
 
 static int device_key(ae_secure_t *s, uint8_t k[AE_KEY_LEN])
 {
-    uint8_t *b = NULL; size_t n = 0;
-    if (ae_store_read(s->store, AE_ZONE_SYS, DEVICE_KEY_FILE, &b, &n) != 0 || n != AE_KEY_LEN) {
-        free(b); return -1;
-    }
-    memcpy(k, b, AE_KEY_LEN); free(b); return 0;
+    /* 设备主密钥来自 TEE 锚点（软件后端持久化于 sys/device.key，硬件后端由安全芯片提供） */
+    if (ae_tee_device_key(s->store, s->tee_backend, k) != 0) return -1;
+    return 0;
 }
 /* auth.mac = HMAC(device_key, auth_state 前段) —— 改 fails 而不重算会被检出 */
 static void auth_recompute_mac(ae_secure_t *s)
@@ -263,13 +262,11 @@ static int ensure_sys_files(ae_secure_t *s)
         static const char br[] = "Company: 长明科技（武汉）有限公司\nBrand: 长明 / Changming\nProduct: 长明 Aether\nSystem: AetherOS\n";
         if (ae_store_atomic_write(st, AE_ZONE_SYS, "brand.txt", br, sizeof br - 1) != 0) return -1;
     }
-    if (!ae_store_exists(st, AE_ZONE_SYS, DEVICE_KEY_FILE)) {
-        uint8_t k[AE_KEY_LEN];
-        if (ae_random(k, sizeof k) != 0) return -1;
-        int rc = ae_store_atomic_write(st, AE_ZONE_SYS, DEVICE_KEY_FILE, k, sizeof k);
-        ae_zero(k, sizeof k);
-        if (rc != 0) return -1;
-    }
+    /* 设备主密钥经 TEE 锚点落实（软件后端首次生成并持久化 sys/device.key；
+       硬件后端在真机由安全芯片提供）。认证 MAC / 审计链密钥都从它派生。 */
+    uint8_t dk[AE_KEY_LEN];
+    if (ae_tee_device_key(st, AE_TEE_SOFTWARE, dk) != 0) return -1;
+    ae_zero(dk, sizeof dk);
     return 0;
 }
 
@@ -291,8 +288,13 @@ int ae_secure_open(const char *root, const ae_sec_config_t *cfg, ae_secure_t **o
     if (!s) return -1;
     if (cfg) s->cfg = *cfg; else ae_secure_default_config(&s->cfg);
     s->last_receipt[0] = 0;
+    s->tee_backend = AE_TEE_SOFTWARE;   /* 当前软件锚点；真机切 AE_TEE_HARDWARE */
     if (ae_store_open(root, &s->store) != 0) { free(s); return -1; }
-    if (ae_audit_open(s->store, &s->audit) != 0) { ae_store_close(s->store); free(s); return -1; }
+    uint8_t audit_key[AE_KEY_LEN];
+    if (ae_tee_audit_key(s->store, s->tee_backend, audit_key) != 0) {
+        ae_store_close(s->store); free(s); return -1;
+    }
+    if (ae_audit_open(s->store, audit_key, &s->audit) != 0) { ae_store_close(s->store); free(s); return -1; }
     /* 审计链与完整性：异常只标记，交由 boot/unlock 按配置处置 */
     uint64_t cnt; uint8_t head[AE_SHA256_LEN];
     if (ae_audit_verify(s->audit, &cnt, head) != 0) s->tampered = 1;
@@ -335,6 +337,52 @@ const char *ae_secure_last_receipt(ae_secure_t *s)
 int ae_secure_audit_verify(ae_secure_t *s, uint64_t *count, uint8_t head[AE_SHA256_LEN])
 {
     return s ? ae_audit_verify(s->audit, count, head) : -1;
+}
+
+/* ------------------------------------------------------------------ 设备自证 */
+int ae_secure_attest(ae_secure_t *s, char *report, size_t n)
+{
+    if (!s || !report || !n) return -1;
+    uint8_t dk[AE_KEY_LEN];
+    if (ae_tee_device_key(s->store, s->tee_backend, dk) != 0) return -1;
+    uint8_t sd[AE_SHA256_LEN]; (void)ae_store_zone_digest(s->store, AE_ZONE_SYS, sd);
+    uint8_t head[AE_SHA256_LEN]; uint64_t cnt = 0;
+    (void)ae_audit_verify(s->audit, &cnt, head);
+    size_t vs = 0; (void)ae_store_volume_size(s->store, VOL_FILE, &vs);
+    char sdh[65], hh[65]; hex_of(sd, sdh); hex_of(head, hh);
+    /* 规范体：用固定分隔符拼接，签名覆盖全部安全状态字段 */
+    char body[1024];
+    snprintf(body, sizeof body,
+        "AETHER_ATTEST|v1|state=%d|fails=%u|maxfails=%u|vault=%s|sys=%s|audit=%s|seq=%llu|ts=%lld",
+        (int)s->state, ae_secure_fails(s), ae_secure_max_fails(s),
+        vs ? "present" : "absent", sdh, hh,
+        (unsigned long long)cnt, (long long)time(NULL));
+    uint8_t sig[AE_SHA256_LEN];
+    ae_hmac_sha256(dk, AE_KEY_LEN, (const uint8_t*)body, strlen(body), sig);
+    ae_zero(dk, sizeof dk);
+    char sigh[65]; hex_of(sig, sigh);
+    snprintf(report, n,
+        "{\n"
+        "  \"type\": \"AETHER_DEVICE_ATTESTATION\",\n"
+        "  \"version\": 1,\n"
+        "  \"tee_backend\": \"%s\",\n"
+        "  \"state\": %d,\n"
+        "  \"fails\": %u,\n"
+        "  \"max_fails\": %u,\n"
+        "  \"vault\": \"%s\",\n"
+        "  \"sys_digest\": \"%s\",\n"
+        "  \"audit_head\": \"%s\",\n"
+        "  \"audit_seq\": %llu,\n"
+        "  \"timestamp\": %lld,\n"
+        "  \"signature\": \"%s\",\n"
+        "  \"signed_body\": \"%s\"\n"
+        "}\n",
+        ae_tee_backend_name(s->tee_backend),
+        (int)s->state, ae_secure_fails(s), ae_secure_max_fails(s),
+        vs ? "present" : "absent", sdh, hh,
+        (unsigned long long)cnt, (long long)time(NULL),
+        sigh, body);
+    return 0;
 }
 
 int ae_secure_init(ae_secure_t *s, const char *password, const char *duress)

@@ -323,8 +323,7 @@ static void group_triggers(void)
     ae_secure_close(k);
 }
 
-/* -------------------------------- 组 I/J：空闲锁定 / 指数退避 */
-static void group_idle_backoff(void)
+/* -------------------------------- 组 I/J：空闲锁定 / 指数退避 */static void group_idle_backoff(void)
 {
     GROUP("I/J 会话空闲锁定 / 暴力破解指数退避");
     char root[256]; char m[512];
@@ -347,6 +346,67 @@ static void group_idle_backoff(void)
     ae_secure_close(b);
 }
 
+/* -------------------------------- 组 K：TEE 锚点 / 密钥驻留 / 设备自证 */
+static void group_tee_attest(void)
+{
+    GROUP("K TEE 锚点 / 密钥驻留 / 设备自证（外部可观测）");
+    char root[256]; ae_sec_config_t cfg = base_cfg(); char m[512];
+
+    /* K1：设备主密钥持久化且跨重开稳定（密钥驻留的软件近似） */
+    ae_secure_t *s = fresh("tee", &cfg, root, sizeof root);
+    ae_store_t *st = ae_secure_store(s);
+    uint8_t *k1 = NULL; size_t k1l = 0;
+    CHECK(ae_store_read(st, "sys", "device.key", &k1, &k1l) == 0 && k1l == 32, "K1 设备密钥已落盘(32B)");
+    ae_secure_close(s);
+    ae_secure_t *s2 = NULL; ae_secure_open(root, &cfg, &s2);
+    uint8_t *k2 = NULL; size_t k2l = 0;
+    CHECK(s2 && ae_store_read(ae_secure_store(s2), "sys", "device.key", &k2, &k2l) == 0 &&
+          k2l == 32 && k1l == 32 && !memcmp(k1, k2, 32),
+          "K1 设备密钥跨重开稳定一致（密钥驻留）");
+    free(k1); free(k2);
+    if (s2) ae_secure_close(s2);
+
+    /* K2：审计链被设备密钥绑定——换一把设备密钥后旧链验证必失败（无密钥不可伪造） */
+    ae_secure_t *t = fresh("keybind", &cfg, root, sizeof root);
+    ae_audit_t *a = ae_secure_audit(t);
+    CHECK(ae_audit_append(a, "KTEST", "bind-check") == 0, "K2 写一条审计");
+    ae_store_t *ts = ae_secure_store(t);
+    uint8_t *dk = NULL; size_t dkl = 0;
+    CHECK(ae_store_read(ts, "sys", "device.key", &dk, &dkl) == 0 && dkl == 32, "K2 读取设备密钥");
+    uint8_t rot[32];
+    CHECK(ae_random(rot, sizeof rot) == 0, "K2 生成替换密钥");
+    CHECK(ae_store_atomic_write(ts, "sys", "device.key", rot, sizeof rot) == 0, "K2 覆写 device.key");
+    ae_secure_close(t); free(dk);
+    ae_secure_t *t2 = NULL; ae_secure_open(root, &cfg, &t2);
+    uint64_t cnt = 0; uint8_t head[32];
+    CHECK(t2 && ae_secure_audit_verify(t2, &cnt, head) != 0, "K2 换密钥后旧链验证失败（HMAC 绑定）");
+    ae_secure_close(t2);
+
+    /* K3：设备自证——用真设备密钥可验证；篡改规范体即签名失效（防伪造/防篡改） */
+    ae_secure_t *u = fresh("attest", &cfg, root, sizeof root);
+    ae_store_t *us = ae_secure_store(u);
+    CHECK(ae_secure_init(u, "AttestPass!1", NULL) == 0, "K3 init");
+    CHECK(ae_secure_unlock(u, "AttestPass!1", m, sizeof m) == AE_UNLOCK_OK, "K3 unlock");
+    char rep[2048];
+    CHECK(ae_secure_attest(u, rep, sizeof rep) == 0, "K3 生成设备自证报告");
+    char body[1024], sig[65];
+    CHECK(json_get(rep, "signed_body", body, sizeof body) == 0, "K3 含 signed_body");
+    CHECK(json_get(rep, "signature", sig, sizeof sig) == 0, "K3 含 signature");
+    uint8_t *rk = NULL; size_t rkl = 0;
+    CHECK(ae_store_read(us, "sys", "device.key", &rk, &rkl) == 0 && rkl == 32, "K3 读取设备密钥");
+    uint8_t calc[32]; ae_hmac_sha256(rk, 32, (const uint8_t*)body, strlen(body), calc);
+    char calch[65]; ae_hex(calc, 32, calch);
+    CHECK(strcmp(calch, sig) == 0, "K3 用真设备密钥验证通过");
+    /* 篡改规范体后重算：签名必失效 */
+    char tb[1024]; snprintf(tb, sizeof tb, "%s", body);
+    tb[10] = (char)(tb[10] ^ 0xFF);   /* 翻转一处，模拟攻击者改状态 */
+    uint8_t calc2[32]; ae_hmac_sha256(rk, 32, (const uint8_t*)tb, strlen(tb), calc2);
+    char calch2[65]; ae_hex(calc2, 32, calch2);
+    CHECK(strcmp(calch2, sig) != 0, "K3 篡改后签名失效（报告防伪造）");
+    free(rk);
+    ae_secure_close(u);
+}
+
 int main(void)
 {
     printf("================ AetherOS Secure Core 全套自测 ================\n");
@@ -357,6 +417,7 @@ int main(void)
     group_counter_tamper();
     group_triggers();
     group_idle_backoff();
+    group_tee_attest();
     printf("\n================================================================\n");
     printf("  合计: %d PASS / %d FAIL\n", P, F);
     printf("================================================================\n");

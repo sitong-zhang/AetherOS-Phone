@@ -3,6 +3,7 @@
  */
 #define _GNU_SOURCE
 #include "aether_audit.h"
+#include "aether_crypto.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 struct ae_audit {
     ae_store_t *store;
     uint8_t     head[AE_SHA256_LEN];
+    uint8_t     key[AE_KEY_LEN];   /* 审计链密钥（设备密钥派生），不入持久化，仅内存 */
     uint64_t    seq;
 };
 
@@ -57,13 +59,14 @@ static int load_head(ae_audit_t *a)
     return 0;
 }
 
-int ae_audit_open(ae_store_t *s, ae_audit_t **out)
+int ae_audit_open(ae_store_t *s, const uint8_t key[AE_KEY_LEN], ae_audit_t **out)
 {
-    if (!s||!out) return -1;
+    if (!s||!out||!key) return -1;
     *out=NULL;
     ae_audit_t *a=(ae_audit_t*)calloc(1,sizeof *a);
     if (!a) return -1;
     a->store=s;
+    memcpy(a->key, key, AE_KEY_LEN);
     if (load_head(a)!=0) {
         /* 创世：空链 + 全 0 head */
         a->seq=0; memset(a->head,0,AE_SHA256_LEN);
@@ -88,11 +91,12 @@ int ae_audit_append(ae_audit_t *a, const char *event, const char *detail)
     uint64_t seq=a->seq+1;
     snprintf(body,sizeof body,"%llu|%ld|%s|%s|%s",
              (unsigned long long)seq,(long)time(NULL),ev,de,prevhex);
-    /* hash = SHA256(prev_raw || body) */
-    ae_sha256_ctx c; ae_sha256_init(&c);
-    ae_sha256_update(&c,a->head,AE_SHA256_LEN);
-    ae_sha256_update(&c,body,strlen(body));
-    uint8_t h[AE_SHA256_LEN]; ae_sha256_final(&c,h);
+    /* hash = HMAC(audit_key, prev_raw || body)：把链绑到设备，无密钥不可重算/伪造 */
+    uint8_t buf[AE_SHA256_LEN + sizeof body];
+    memcpy(buf, a->head, AE_SHA256_LEN);
+    memcpy(buf + AE_SHA256_LEN, body, strlen(body));
+    uint8_t h[AE_SHA256_LEN];
+    ae_hmac_sha256(a->key, AE_KEY_LEN, buf, AE_SHA256_LEN + strlen(body), h);
     ae_hex(h,AE_SHA256_LEN,hashhex);
     snprintf(line,sizeof line,"%s|%s\n",body,hashhex);
     /* 追加写 + fsync */
@@ -139,12 +143,13 @@ int ae_audit_verify(ae_audit_t *a, uint64_t *count, uint8_t head[AE_SHA256_LEN])
         char rebuilt[1400];
         snprintf(rebuilt,sizeof rebuilt,"%s|%s|%s|%s|%s",
                  fields[0],fields[1],fields[2],fields[3],fields[4]);
-        ae_sha256_ctx c; ae_sha256_init(&c);
-        ae_sha256_update(&c,prev,AE_SHA256_LEN);
-        ae_sha256_update(&c,rebuilt,strlen(rebuilt));
-        uint8_t calc[AE_SHA256_LEN]; ae_sha256_final(&c,calc);
+        uint8_t buf[AE_SHA256_LEN + sizeof rebuilt];
+        memcpy(buf, prev, AE_SHA256_LEN);
+        memcpy(buf + AE_SHA256_LEN, rebuilt, strlen(rebuilt));
+        uint8_t calc[AE_SHA256_LEN];
+        ae_hmac_sha256(a->key, AE_KEY_LEN, buf, AE_SHA256_LEN + strlen(rebuilt), calc);
         char calchex[65]; ae_hex(calc,AE_SHA256_LEN,calchex);
-        if (strcmp(calchex,hashhex)!=0){ bad=1; break; }             /* 内容被改 */
+        if (strcmp(calchex,hashhex)!=0){ bad=1; break; }             /* HMAC 不匹配：内容被改或无密钥伪造 */
         memcpy(prev,calc,AE_SHA256_LEN);
         ae_hex(prev,AE_SHA256_LEN,expected_prev);
         ln=strtok_r(NULL,"\n",&save);

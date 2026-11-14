@@ -14,7 +14,7 @@ CC="${CC:-gcc}"
 CFLAGS="-std=c11 -O2 -Wall -Wextra -Werror -I$ROOT/secure/include"
 CORE="$ROOT/secure/core/aether_crypto.c $ROOT/secure/core/aether_store.c \
 $ROOT/secure/core/aether_audit.c $ROOT/secure/core/aether_integrity.c \
-$ROOT/secure/core/aether_secure.c"
+$ROOT/secure/core/aether_tee.c $ROOT/secure/core/aether_secure.c"
 OS_BIN="$OUT/bin/aether-os"
 TEST_BIN="$OUT/bin/test_secure"
 DEMO_ROOT="$OUT/secure-demo"

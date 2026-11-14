@@ -94,4 +94,8 @@ ae_audit_t    *ae_secure_audit(ae_secure_t *s);
 int  ae_secure_wipe(ae_secure_t *s, const char *trigger,
                     char *receipt_path_out, size_t n);
 
+/* 设备自证：用设备密钥对当前安全状态做 HMAC 签名，输出可验证 JSON 报告。
+ * 外部持有设备密钥即可验证（对标 Android Key Attestation 的可验证完整性报告）。 */
+int  ae_secure_attest(ae_secure_t *s, char *report, size_t n);
+
 #endif /* AETHER_SECURE_H */

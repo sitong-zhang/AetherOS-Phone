@@ -98,7 +98,8 @@ static int build_snapshot(ae_secure_t *s, char *buf, size_t n)
         "\"指数退避\",\"全盘静态加密(DEK+KEK)\",\"crypto-shred 密钥销毁\","
         "\"多轮覆写数据卷\",\"只追加防篡改审计链\",\"系统区完整性自检(篡改即擦)\","
         "\"会话空闲锁定\",\"内存密钥清零(mlock+zero)\",\"紧急一键销毁\","
-        "\"系统区/数据区/日志区隔离\",\"可离线校验销毁证明\"]\n"
+        "\"系统区/数据区/日志区隔离\",\"可离线校验销毁证明\","
+        "\"密钥驻留TEE锚点(软件当前/硬件真机)\",\"设备密钥自证attestation\"]\n"
         "}\n",
         roote, state_str(ae_secure_state(s)),
         ae_secure_fails(s), ae_secure_max_fails(s),
@@ -238,6 +239,16 @@ static int cmd_audit(ae_secure_t *s, int argc, char **argv)
     }
     return ok ? 0 : 1;
 }
+static int cmd_attest(ae_secure_t *s, int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    char report[2048];
+    if (ae_secure_attest(s, report, sizeof report) != 0) {
+        printf("ERR 设备自证失败（TEE 锚点不可用？）\n"); return -1;
+    }
+    printf("%s", report);
+    return 0;
+}
 static int cmd_help(ae_secure_t *s, int argc, char **argv)
 {
     (void)s; (void)argc; (void)argv;
@@ -255,6 +266,7 @@ static int cmd_help(ae_secure_t *s, int argc, char **argv)
       "  status  [--json]                             系统状态\n"
       "  snapshot [路径.json]                          导出真实状态快照\n"
       "  audit                                        校验防篡改审计链\n"
+      "  attest                                       设备自证（设备密钥签名的可验证完整性报告）\n"
       "  help / exit                                  帮助 / 退出\n");
     return 0;
 }
@@ -273,6 +285,7 @@ static int dispatch(ae_secure_t *s, const char *cmd, int argc, char **argv)
     else if (!strcmp(cmd,"status"))   return cmd_status(s,argc,argv);
     else if (!strcmp(cmd,"snapshot")) return cmd_snapshot(s,argc,argv);
     else if (!strcmp(cmd,"audit"))    return cmd_audit(s,argc,argv);
+    else if (!strcmp(cmd,"attest"))   return cmd_attest(s,argc,argv);
     else if (!strcmp(cmd,"help") || !strcmp(cmd,"?")) return cmd_help(s,argc,argv);
     else { printf("未知命令: %s（输入 help）\n", cmd); return -1; }
 }
