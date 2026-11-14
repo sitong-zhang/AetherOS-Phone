@@ -4,7 +4,8 @@
 # QEMU aarch64 (-M virt, TCG) → Linux 6.6.70 Image → 自建 ext4 根盘 →
 # 自研 PID 1 aether-init → 服务编排（含合成器）→ virtio-gpu 图形上屏 →
 # 开机诊断完成标记 + QMP screendump 抓取真实首帧。
-# 串口日志与图形证据写入仓库外本地证据目录。
+# 串口日志与图形证据写入仓库内 evidence/（现场生成，不随仓库分发）。
+# 物理显示经内核 video= 覆盖为竖屏 720x1280，与手机逻辑画布 1:1，文字原分辨率上屏。
 set -euo pipefail
 
 BOOT="$(cd "$(dirname "$0")" && pwd)"
@@ -33,7 +34,7 @@ timeout "$TIMEOUT" qemu-system-aarch64 \
     -M virt -cpu cortex-a57 -m 512M -smp 2 \
     -kernel "$IMAGE" \
     -drive "file=$ROOTFS,format=raw,if=virtio" \
-    -append "root=/dev/vda rw console=ttyAMA0 init=/init panic=5 loglevel=7" \
+    -append "root=/dev/vda rw console=ttyAMA0 init=/init panic=5 loglevel=7 video=720x1280" \
     -device virtio-gpu-pci \
     -display none -serial "file:$LOG" -monitor none -no-reboot \
     -qmp "unix:$QMP,server=on,wait=off" \

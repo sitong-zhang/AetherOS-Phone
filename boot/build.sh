@@ -81,6 +81,10 @@ printf 'root:x:0:0:root:/root:/bin/sh\n' > "$STAGE/etc/passwd"
 printf 'root:x:0:\n'                    > "$STAGE/etc/group"
 printf 'aetheros\n'                    > "$STAGE/etc/hostname"
 
+# 系统时区（默认 UTC+8；设置应用可改写本文件，合成器经 start-compositor.sh 读它注入 TZ）。
+# 缺省值使锁屏时间与 shell date 一致（均为本地时区），而非裸 UTC。
+printf 'CST-8\n'                       > "$STAGE/etc/TZ"
+
 truncate -s "${SIZE}M" "$ROOTFS"
 mkfs.ext4 -q -F -d "$STAGE" -b 4096 "$ROOTFS"
 

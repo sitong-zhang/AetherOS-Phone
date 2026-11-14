@@ -19,7 +19,7 @@ MARKERS = [
     ("services",      r"加载了\s+([1-9]\d*)\s+个服务",                  "服务清单加载且非空"),
     ("system_ready",  r"所有可启动服务已拉起，系统就绪",                  "服务编排完成"),
     ("gpu_device",    r"fb0=yes dri=card0",                              "virtio-gpu DRM/fb 设备就绪"),
-    ("compositor",    r"显示打开\s+\d+x\d+\s+backend=\d",                "自研合成器打开显示并上屏"),
+    ("compositor",    r"显示打开 720x1280 backend=1",                   "自研合成器打开竖屏显示(720x1280)并上屏"),
     ("secure_selftest", r"AETHEROS_SECURE_READY=1",                      "安全引擎随开机自检通过"),
     ("boot_diag",     r"AETHEROS_BOOT_DIAG_DONE=1",                       "开机诊断完成"),
 ]
@@ -44,13 +44,17 @@ def check_frame(frame_json):
     last = samples[-1] if samples else {}
     colors = last.get("sample_colors", 0)
     non_bg = last.get("non_bg_ratio", 0.0)
+    fw = last.get("width", 0)
+    fh = last.get("height", 0)
     valid = bool(d.get("valid")) and bool(d.get("stable"))
     pixel_ok = colors >= FRAME_MIN_COLORS and non_bg >= FRAME_MIN_NON_BG
+    # 首帧分辨率必须与文档/串口标记一致：竖屏 720x1280（画布 1:1，无 letterbox 缩放）。
+    res_ok = (fw == 720 and fh == 1280)
     return {
-        "passed": bool(valid and pixel_ok),
-        "desc": "真实图形首帧（QEMU QMP 抓帧）",
-        "detail": "valid=%s stable=%s 颜色=%s 非背景=%.3f 帧数=%s" % (
-            d.get("valid"), d.get("stable"), colors, non_bg, d.get("frames")),
+        "passed": bool(valid and pixel_ok and res_ok),
+        "desc": "真实图形首帧（QEMU QMP 抓帧，720x1280 竖屏）",
+        "detail": "valid=%s stable=%s 颜色=%s 非背景=%.3f 分辨率=%ux%u 帧数=%s" % (
+            d.get("valid"), d.get("stable"), colors, non_bg, fw, fh, d.get("frames")),
         "source": d.get("source"),
     }
 

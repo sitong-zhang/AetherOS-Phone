@@ -9,6 +9,9 @@
 - 用户明确约定：仓库只上架「真正的系统 / 整个产品」，截图、日志、报告等取证素材存本地。
 - 取证产物由**仓库内的脚本现场生成**，任何人 clone 后按下方路径即可复现并自证，
   不依赖作者云电脑上的本地归档。
+- 关于「干净 clone 跑不出门禁」：门禁默认证据根在仓库内 `evidence/round-009`，但取证产物
+  （串口日志 / 首帧 PNG / JSON）按约定不入库。缺证据时 `gate_boot.py` **不崩溃、不虚报**，
+  直接打印上方 4 步复现路径并返回非零；照做即可在本地现场生成全部证据（见 02:23 实测报告 B6）。
 
 ## 可复现路径（clone 后即成立）
 
@@ -55,7 +58,8 @@ bash scripts/secure.sh test
 | round-006 | 仓库产品化收尾 + 攻击意图判定层 | `test_secure.stdout.txt`(356/0)、`gate_l2.json` |
 | round-007 | 复检遗留闭环 + M1 A 轨真开机取证 | `boot-serial.log`、`gate_boot.json`(6/6) |
 | round-008 | 商用界面文案清理 + 自毁动效 | `0*.png`、`wipe-animation/frame-*.png` |
-| round-009 | A 轨真实图形首帧 + 安全引擎随开机自检 | `first-frame.png`、`boot-serial.log`、`gate_boot.json`(10/10) |
+| round-009 | A 轨真实图形首帧 + 安全引擎随开机自检 | `first-frame.png`、`boot-serial.log`、`gate_boot.json`(10/10)；物理帧经内核 `video=` 覆盖为**竖屏 720x1280 1:1**（原 1280x800 横屏 letterbox 已弃） |
 | round-010 | 复检 01:41（证据可复现化 + N2 钉死 + 文档边界） | `gate_boot.json`、`verify-rc.txt` |
+| round-011 | 复检 02:23 实测报告（B1 分辨率确定性 + B2 文字 1:1 清晰 + B3 时区 + B4/B5 构建文档） | `first-frame.png`(720x1280, 文字锐度较旧管线 +11.8×)、`boot-serial.log`(`localtime tz=CST-8`)、`gate_boot.json`(10/10) |
 
 状态提升一律由上述脚本现场取证，不凭文字陈述。

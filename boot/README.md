@@ -34,7 +34,7 @@ QEMU aarch64 (-M virt, TCG, virtio-gpu-pci)
    → virtio-gpu DRM probe → /dev/dri/card0 + fbdev emulation /dev/fb0
    → 自研 PID 1 aether-init
    → 服务编排（aetherosd / aether-compositor / aether-security / bootdiag）
-   → 合成器打开显示，竖屏画布上屏（720x1280 → 1280x800 letterbox）
+   → 合成器打开显示，竖屏画布上屏（720x1280 物理帧，画布 1:1 无 letterbox 缩放）
    → 安全引擎设备自证自检（attest 签名 + 系统摘要锚）
    → 开机诊断输出真实内核数据源（/proc/version、/proc/meminfo、/proc/uptime）
    → QEMU QMP screendump 抓取真实图形首帧（像素级判定）
@@ -43,7 +43,7 @@ QEMU aarch64 (-M virt, TCG, virtio-gpu-pci)
 
 串口证据中可核实的标记：`Linux version 6.6.70`、`EXT4-fs (vda): mounted filesystem`、
 `VFS: Mounted root`、`Run /init as init process`、`AetherOS 启动 (PID 1)`、
-`加载了 4 个服务`、`所有可启动服务已拉起，系统就绪`、`显示打开 1280x800 backend=1`、
+`加载了 4 个服务`、`所有可启动服务已拉起，系统就绪`、`显示打开 720x1280 backend=1`、
 `AETHEROS_SECURE_SELFTEST: arch=aarch64 kernel=6.6.70 attest=OK`、
 `AETHEROS_SECURE_READY=1`、`fb0=yes dri=card0`、`AETHEROS_BOOT_DIAG_DONE=1`。
 
@@ -59,10 +59,15 @@ python3 tools/gate_boot.py    # 开机门禁：逐环节断言串口证据 + 图
 bash scripts/aether.sh start --track A
 ```
 
-> 环境依赖（复现前提）：`aarch64-linux-gnu-gcc`、`qemu-system-aarch64`、`make` 与交叉 libc
-> 基础库。无 root / apt 不可用的环境需先具备交叉工具链与 QEMU（约 30–60 分钟构建内核）；本仓库
-> 提供脚本但不打包 41 MB 内核镜像与 256 MB 根盘（依据约定不入库二进制构建产物）。`evidence/` 目录
-> 随仓库分发（仅说明与可复现路径），实际取证产物由上述脚本现场生成，不入库。
+> 环境依赖（复现前提）：`aarch64-linux-gnu-gcc`、`qemu-system-aarch64`、`make`、交叉 libc 基础库，
+> 以及**内核 kconfig 阶段必需**的 `flex` / `bison` / `bc` / `m4`（缺任一项内核配置直接报错；`bison`
+> 若非系统路径还需 `BISON_PKGDATADIR` 指向其 datadir）。无 root / apt 不可用的环境需先具备交叉工具链
+> 与 QEMU（约 30–60 分钟构建内核）。本仓库提供脚本但不打包 41 MB 内核镜像与 256 MB 根盘（依据约定
+> 不入库二进制构建产物）。
+> **QEMU 版本必须成套**：`virtio-gpu-pci` 显示模块需与 `qemu-system-common`（及 `qemu-system-data`）
+> 同版本，混用不同构建会报 `virtio-gpu-pci is not a valid device model name`（仅同构建模块可加载）。
+> `evidence/` 目录随仓库分发（仅说明与可复现路径），实际取证产物由上述脚本现场生成，不入库：
+> 干净 clone 执行 `fetch-assets → build → run-qemu → gate_boot` 即现场复现全部证据，不依赖仓库外归档。
 
 `boot/build.sh` 分五步：外部资产获取与校验、Linux 内核从源码交叉编译、`guest/src` 同一份
 源码交叉编译、`secure/` 同一份源码交叉编译、ext4 根盘组装。任一环节失败即中止，不产出半成品
