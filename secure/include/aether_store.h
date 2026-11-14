@@ -1,11 +1,13 @@
 /*
  * aether_store.h - 隔离存储后端（模拟整机磁盘）
  *
- * 运行根下分四区，语义严格区分，这是「抹除全部数据但系统不抹除」的地基：
- *   sys/     系统本体：只读基线，自毁引擎绝不写/删此处任何文件
- *   data/    用户全部数据：口令状态、密钥材料、加密卷、缓存 —— 自毁目标
- *   journal/ 只追加防篡改审计链（系统级安全设施，擦除只追加事件不清空）
- *   receipt/ 销毁证明（可离线校验）
+ * 运行根下分五区，语义严格区分，这是「抹除全部数据但系统不抹除」的地基：
+ *   sys/       系统本体：只读基线，自毁引擎绝不写/删此处任何文件
+ *   data/      用户全部数据：口令状态、密钥材料、加密卷、缓存 —— 自毁目标
+ *   journal/   只追加防篡改审计链（系统级安全设施，擦除只追加事件不清空）
+ *   receipt/   销毁证明（可离线校验）
+ *   lockdown/  安全锁定专用：只放「无法倒推的验证锚」verifier 与变砖标记，
+ *              绝不放密码明文；常规 wipe 只抹 data/ 不碰它，熔断才连它一并抹除。
  *
  * 所有写走「临时文件 → fsync → rename → 目录 fsync」原子路径，防断电半写。
  * name 一律拒绝含 '/' 或 ".."，杜绝目录穿越把抹除动作打偏到真实工作区。
@@ -21,6 +23,7 @@
 #define AE_ZONE_DATA     "data"
 #define AE_ZONE_JOURNAL  "journal"
 #define AE_ZONE_RECEIPT  "receipt"
+#define AE_ZONE_LOCKDOWN "lockdown"   /* 安全锁定：验证锚(非密码) + 变砖标记 */
 #define AE_STORE_NAME_MAX 64
 
 typedef struct ae_store ae_store_t;

@@ -19,7 +19,8 @@ struct ae_store { char root[PATH_MAX]; };
 static int valid_zone(const char *z)
 {
     return z && (strcmp(z, AE_ZONE_SYS)==0 || strcmp(z, AE_ZONE_DATA)==0 ||
-                 strcmp(z, AE_ZONE_JOURNAL)==0 || strcmp(z, AE_ZONE_RECEIPT)==0);
+                 strcmp(z, AE_ZONE_JOURNAL)==0 || strcmp(z, AE_ZONE_RECEIPT)==0 ||
+                 strcmp(z, AE_ZONE_LOCKDOWN)==0);
 }
 static int valid_name(const char *n)
 {
@@ -52,9 +53,10 @@ int ae_store_open(const char *root, ae_store_t **out)
     *out = NULL;
     if (mkdir_p(root) != 0) return -1;
     char z[PATH_MAX];
-    static const char *zones[] = {AE_ZONE_SYS, AE_ZONE_DATA, AE_ZONE_JOURNAL, AE_ZONE_RECEIPT};
+    static const char *zones[] = {AE_ZONE_SYS, AE_ZONE_DATA, AE_ZONE_JOURNAL,
+                                  AE_ZONE_RECEIPT, AE_ZONE_LOCKDOWN};
     size_t i;
-    for (i = 0; i < 4; i++) {
+    for (i = 0; i < 5; i++) {
         if (snprintf(z,sizeof z,"%s/%s",root,zones[i]) >= (int)sizeof z) return -1;
         if (mkdir_p(z) != 0) return -1;
     }

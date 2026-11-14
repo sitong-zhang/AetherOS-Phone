@@ -9,13 +9,58 @@
  */
 #define _GNU_SOURCE
 #include "aether_secure.h"
+#include "aether_hal.h"
+#include "aether_lockdown.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <time.h>
+#include <limits.h>
+#include <sys/stat.h>
 
 static const char *g_pw = NULL;
+
+/* 安全锁定子系统：借用 ae_secure 的 store(通过 ae_secure_store 取得)，
+ * 每个命令独立 open/close 一个 ld 视图，避免跨进程状态错乱。 */
+static ae_hal_t *g_hal = NULL;
+static ae_ld_t  *g_ld  = NULL;
+static uint64_t  g_now_ms = 0;   /* --ld-now 注入的确定性时钟(仅云端仿真/取证) */
+
+static int ld_bind(ae_secure_t *s)
+{
+    if (ae_hal_open(AE_HAL_SIM, &g_hal) != 0) return -1;
+    if (g_now_ms) ae_hal_set_now_ms(g_hal, g_now_ms);
+    if (ae_ld_open(ae_secure_store(s), g_hal, &g_ld) != 0) { ae_hal_close(g_hal); g_hal=NULL; return -1; }
+    return 0;
+}
+static void ld_release(void)
+{
+    if (g_ld)  { ae_ld_close(g_ld);  g_ld = NULL; }
+    if (g_hal) { ae_hal_close(g_hal); g_hal = NULL; }
+}
+/* 命令入口统一包装：绑定 ld → 调 fn → 释放 */
+typedef int (*ld_fn)(int argc, char **argv);
+static int ld_wrap(ae_secure_t *s, int argc, char **argv, ld_fn fn)
+{
+    if (ld_bind(s) != 0) { printf("ERR 安全锁定子系统不可用\n"); return -1; }
+    int rc = fn(argc, argv);
+    ld_release();
+    return rc;
+}
+static uint64_t ld_arg_now(int argc, char **argv, uint64_t def)
+{
+    for (int i = 0; i < argc; i++)
+        if (!strcmp(argv[i], "--now") && i+1 < argc) return strtoull(argv[++i], NULL, 10);
+    return def;
+}
+static const char *ld_arg_pw(int argc, char **argv)
+{
+    for (int i = 0; i < argc; i++)
+        if (!strcmp(argv[i], "--pw") && i+1 < argc) return argv[++i];
+    /* main 已把全局 --pw 收到 g_pw；ld 子命令回退复用，避免重复解析。 */
+    return g_pw;
+}
 
 static int ensure_session(ae_secure_t *s)
 {
@@ -99,7 +144,9 @@ static int build_snapshot(ae_secure_t *s, char *buf, size_t n)
         "\"多轮覆写数据卷\",\"只追加防篡改审计链\",\"系统区完整性自检(篡改即擦)\","
         "\"会话空闲锁定\",\"内存密钥清零(mlock+zero)\",\"紧急一键销毁\","
         "\"系统区/数据区/日志区隔离\",\"可离线校验销毁证明\","
-        "\"密钥驻留TEE锚点(软件当前/硬件真机)\",\"设备密钥自证attestation\"]\n"
+        "\"密钥驻留TEE锚点(软件当前/硬件真机)\",\"设备密钥自证attestation\","
+        "\"设备密钥绑定审计链HMAC\",\"安全锁定/熔断模式(首启强设专用密码·零存储)\","
+        "\"组合键10秒+二次确认进入\",\"USB强插/拆机/短接→连系统抹除变砖\"]\n"
         "}\n",
         roote, state_str(ae_secure_state(s)),
         ae_secure_fails(s), ae_secure_max_fails(s),
@@ -249,6 +296,79 @@ static int cmd_attest(ae_secure_t *s, int argc, char **argv)
     printf("%s", report);
     return 0;
 }
+/* ---------------------------------------------------- 安全锁定 / 熔断命令 */
+static int ld_provision(int argc, char **argv)
+{
+    const char *pw = ld_arg_pw(argc, argv);
+    if (!pw) { printf("ERR ld-provision 需要 --pw <专用安全密码>\n"); return -1; }
+    char dialog[2048], why[256];
+    int rc = ae_ld_provision_begin(g_ld, pw, dialog, sizeof dialog, why, sizeof why);
+    if (rc == -1) { printf("强度不合格: %s\n", why); return -1; }
+    if (rc == -2) { printf("拒绝: %s\n", why); return -1; }
+    printf("%s", dialog);   /* 二次确认弹窗：警告 + 明文回显(仅屏幕，绝不落盘) */
+    /* 冷却窗口由状态机强制；此处按 --now 注入时刻走确认(云端取证用真时钟) */
+    uint64_t now = ld_arg_now(argc, argv, ae_hal_now_ms(g_hal) + AE_LD_COOLDOWN_MS);
+    int cr = ae_ld_provision_confirm(g_ld, now, why, sizeof why);
+    if (cr != 0) { printf("ERR 确认失败: %s\n", why); return -1; }
+    printf("OK 专用安全密码已设定（系统零存储密码明文，仅保留不可倒推验证锚）\n");
+    return 0;
+}
+static int ld_status(int argc, char **argv)
+{
+    (void)argc; (void)argv;
+    printf("安全锁定状态: %s\n", ae_ld_state_name(g_ld));
+    printf("  专用密码已设定: %s | 验证锚落盘: %s | 开机硬门: %s\n",
+           ae_ld_is_provisioned(g_ld) ? "是" : "否",
+           ae_ld_anchor_exists(g_ld) ? "是" : "否",
+           ae_ld_oobe_gate(g_ld) ? "放行" : "拦截(未设定/已变砖)");
+    printf("  物理后端: %s | 安全芯片: %s | 报警计数: %u\n",
+           ae_hal_backend_name(g_hal),
+           ae_hal_secure_element(g_hal) ? "硬件在线" : "软件锚点(真机接 TEE/eFuse)",
+           ae_hal_alarm_count(g_hal));
+    return 0;
+}
+static int ld_gesture(int argc, char **argv)
+{
+    /* 默认注入一套「满 10 秒 + 音量上确认」事件；--now 指定计时起点 */
+    uint64_t t0 = ld_arg_now(argc, argv, ae_hal_now_ms(g_hal));
+    char m[512];
+    ae_hal_event_t seq[] = {AE_EV_KEY_POWER, AE_EV_KEY_VOL_DOWN};
+    uint64_t ts[] = {t0, t0};
+    for (int i = 0; i < 2; i++) { (void)ae_ld_on_event(g_ld, seq[i], ts[i], m, sizeof m); printf("%s\n", m); }
+    (void)ae_ld_on_event(g_ld, AE_EV_KEY_POWER, t0 + AE_LD_GESTURE_MS, m, sizeof m);
+    printf("%s\n", m);
+    (void)ae_ld_on_event(g_ld, AE_EV_KEY_VOL_UP, t0 + AE_LD_GESTURE_MS + 1, m, sizeof m);
+    printf("%s\n", m);
+    printf("最终状态: %s\n", ae_ld_state_name(g_ld));
+    return ae_ld_state(g_ld) == AE_LD_LOCKED ? 0 : -1;
+}
+static int ld_unlock(int argc, char **argv)
+{
+    const char *pw = ld_arg_pw(argc, argv);
+    if (!pw) { printf("ERR ld-unlock 需要 --pw <专用安全密码>\n"); return -1; }
+    char m[512];
+    int rc = ae_ld_unlock(g_ld, pw, m, sizeof m);
+    printf("%s\n", m);
+    return rc;
+}
+static int ld_inject(int argc, char **argv)
+{
+    const char *kind = (argc > 0) ? argv[0] : "";
+    ae_hal_event_t ev;
+    if (!strcmp(kind, "usb")) ev = AE_EV_USB_DATA;
+    else if (!strcmp(kind, "chassis")) ev = AE_EV_CHASSIS_OPEN;
+    else if (!strcmp(kind, "short")) ev = AE_EV_TESTPOINT_SHORT;
+    else { printf("用法: ld-inject <usb|chassis|short>\n"); return -1; }
+    char m[512];
+    uint64_t now = ld_arg_now(argc, argv, ae_hal_now_ms(g_hal));
+    (void)ae_hal_inject(g_hal, ev);
+    int fired = ae_ld_on_event(g_ld, ev, now, m, sizeof m);
+    printf("%s\n", m);
+    printf("熔断触发: %s | 状态: %s | 报警: %u\n",
+           fired ? "是" : "否", ae_ld_state_name(g_ld), ae_hal_alarm_count(g_hal));
+    return 0;
+}
+
 static int cmd_help(ae_secure_t *s, int argc, char **argv)
 {
     (void)s; (void)argc; (void)argv;
@@ -267,6 +387,12 @@ static int cmd_help(ae_secure_t *s, int argc, char **argv)
       "  snapshot [路径.json]                          导出真实状态快照\n"
       "  audit                                        校验防篡改审计链\n"
       "  attest                                       设备自证（设备密钥签名的可验证完整性报告）\n"
+      "  --- 安全锁定 / 熔断模式 ---\n"
+      "  ld-provision --pw <专用密码> [--now <毫秒>]    首启强制设定(强度+弹窗回显+10秒冷却)\n"
+      "  ld-status                                     查看锁定状态/硬门/物理后端\n"
+      "  ld-gesture   [--now <毫秒>]                   组合键：电源+音量下满10秒+音量上确认\n"
+      "  ld-unlock    --pw <专用密码>                  用专用密码退出安全锁定模式\n"
+      "  ld-inject    <usb|chassis|short> [--now ...]  注入物理破解(USB强插/拆机/短接)→熔断\n"
       "  help / exit                                  帮助 / 退出\n");
     return 0;
 }
@@ -286,6 +412,11 @@ static int dispatch(ae_secure_t *s, const char *cmd, int argc, char **argv)
     else if (!strcmp(cmd,"snapshot")) return cmd_snapshot(s,argc,argv);
     else if (!strcmp(cmd,"audit"))    return cmd_audit(s,argc,argv);
     else if (!strcmp(cmd,"attest"))   return cmd_attest(s,argc,argv);
+    else if (!strcmp(cmd,"ld-provision")) return ld_wrap(s,argc,argv,ld_provision);
+    else if (!strcmp(cmd,"ld-status"))    return ld_wrap(s,argc,argv,ld_status);
+    else if (!strcmp(cmd,"ld-gesture"))   return ld_wrap(s,argc,argv,ld_gesture);
+    else if (!strcmp(cmd,"ld-unlock"))    return ld_wrap(s,argc,argv,ld_unlock);
+    else if (!strcmp(cmd,"ld-inject"))    return ld_wrap(s,argc,argv,ld_inject);
     else if (!strcmp(cmd,"help") || !strcmp(cmd,"?")) return cmd_help(s,argc,argv);
     else { printf("未知命令: %s（输入 help）\n", cmd); return -1; }
 }
@@ -321,11 +452,30 @@ int main(int argc, char **argv)
         else if (!strcmp(argv[i], "--idle") && i+1 < argc) cfg.idle_timeout_s = (uint32_t)strtoul(argv[++i], NULL, 10);
         else if (!strcmp(argv[i], "--no-delay")) cfg.delay_enable = 0;
         else if (!strcmp(argv[i], "--no-tamper-wipe")) cfg.tamper_wipe = 0;
+        else if (!strcmp(argv[i], "--ld-now") && i+1 < argc) g_now_ms = strtoull(argv[++i], NULL, 10);
         else words[wn++] = argv[i];
     }
     const char *cmd = wn ? words[0] : "status";
     int cargc = wn ? wn-1 : 0;
     char **cargv = wn ? words+1 : NULL;
+
+    /* 变砖是 L0 引导级终态：任何子系统(含 secure 重建系统文件)都不许再启动。
+     * 必须在 ae_secure_open 之前拦截，否则会重建 sys/device.key 造成"没删干净"。 */
+    char brick[PATH_MAX];
+    if (snprintf(brick, sizeof brick, "%s/%s/%s", root, AE_ZONE_LOCKDOWN,
+                 AE_LD_BRICK_FILE) > 0) {
+        struct stat bst;
+        if (stat(brick, &bst) == 0 && S_ISREG(bst.st_mode)) {
+            if (!strcmp(cmd, "ld-status")) {
+                printf("安全锁定状态: BRICKED(已熔断·永久变砖)\n"
+                       "  开机硬门: 拦截 | 系统本体已抹除 | 任何操作/任何密码均无法恢复\n"
+                       "  唯一出路: 外部重刷镜像(真机由 bootloader/安全芯片管控)\n");
+                return 0;
+            }
+            printf("ERR 设备已熔断变砖：系统本体已抹除，任何命令均被拒（需外部重刷）\n");
+            return 3;
+        }
+    }
 
     ae_secure_t *s = NULL;
     if (ae_secure_open(root, &cfg, &s) != 0) { printf("ERR 无法打开运行根: %s\n", root); return 2; }

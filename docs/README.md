@@ -12,6 +12,7 @@
 | [`01-STAGE-REPORT.md`](01-STAGE-REPORT.md) | 第一阶段报告：四件套（改了什么/为什么/怎么验证/未解决）、模块三档状态表 |
 | [`02-SECURE-REPORT.md`](02-SECURE-REPORT.md) | 第二阶段报告：安全整机四件套、真实缺陷清单、验收证据、诚实边界 |
 | [`SECURITY.md`](SECURITY.md) | **安全系统设计**：威胁模型、四区隔离、认证/保险库/自毁引擎、14 项特性、边界 |
+| [`SECURITY-BASELINE.md`](SECURITY-BASELINE.md) | **安全设计基线**：口号、威胁模型、三档数据保护、H1–H8 加固、安全锁定/熔断模式完整规格（首启强设专用密码·零存储·10秒冷却·组合键·物理熔断）、逐条验收口径、诚实边界 |
 | [`KERNEL.md`](KERNEL.md) | **自研 x86_64 内核**：架构、引导链关键坑（U/S 两级/系统调用映射/ATA 时序/摘要哈希）、系统调用、内核态安全、边界 |
 | [`03-KERNEL-STUDY.md`](03-KERNEL-STUDY.md) | 第三轮：开源 OS 教程调研与取舍（先搜后学，再落地） |
 | [`04-KERNEL-REPORT.md`](04-KERNEL-REPORT.md) | 第四轮：ring3 安全 demo 真机闭环 + 4 个内核 bug 四件套 + 证据清单 |

@@ -10,6 +10,8 @@
  */
 #define _GNU_SOURCE
 #include "aether_secure.h"
+#include "aether_lockdown.h"
+#include "aether_hal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -407,6 +409,191 @@ static void group_tee_attest(void)
     ae_secure_close(u);
 }
 
+/* ================================================================
+ * 组 L：安全锁定 / 熔断模式（外部可观测）
+ *   - 密码强度边界、首启硬门、两步设定 + 10 秒冷却
+ *   - 零存储：扫描整个运行根，密码明文一个字节都不落盘
+ *   - 组合键状态机：满 10 秒 + 音量上确认才进入；不足/松开/超时不进
+ *   - 仅专用密码可解锁，错误密码无旁路
+ *   - USB 强插 / 拆机 / 短接 → 报警 + 连系统一并抹除 + 永久变砖
+ *   - 状态跨「重启」（重新 open）持久化，变砖不可恢复
+ * ================================================================ */
+#define LD_PW_OK "Abc!Def@Ghi#Jkl$Mn0PqRs"   /* 23 位：大小写+特殊+数字，无 >5 连续序列 */
+
+typedef struct {
+    char root[256];
+    ae_store_t *st;
+    ae_hal_t   *hal;
+    ae_ld_t    *ld;
+} ld_fx_t;
+
+static int ld_setup(const char *tag, ld_fx_t *fx)
+{
+    memset(fx, 0, sizeof *fx);
+    snprintf(fx->root, sizeof fx->root, "/tmp/aether_ld_%s", tag);
+    char cmd[512]; snprintf(cmd, sizeof cmd, "rm -rf %s", fx->root);
+    int rc = system(cmd); (void)rc;
+    if (ae_store_open(fx->root, &fx->st) != 0) return -1;
+    if (ae_hal_open(AE_HAL_SIM, &fx->hal) != 0) return -1;
+    ae_hal_set_now_ms(fx->hal, 1000);            /* 确定性时钟 */
+    if (ae_ld_open(fx->st, fx->hal, &fx->ld) != 0) return -1;
+    return 0;
+}
+static void ld_teardown(ld_fx_t *fx)
+{
+    if (fx->ld)  ae_ld_close(fx->ld);
+    if (fx->hal) ae_hal_close(fx->hal);
+    if (fx->st)  ae_store_close(fx->st);
+    memset(fx, 0, sizeof *fx);
+}
+/* 走完「设定 + 组合键」进入 LOCKED，供解锁/熔断路复用 */
+static int ld_to_locked(ae_ld_t *c, ae_hal_t *hal, const char *pw)
+{
+    char d[1024], why[256];
+    ae_hal_set_now_ms(hal, 1000);
+    if (ae_ld_provision_begin(c, pw, d, sizeof d, why, sizeof why) != 0) return -1;
+    if (ae_ld_provision_confirm(c, 1000 + AE_LD_COOLDOWN_MS, why, sizeof why) != 0) return -1;
+    (void)ae_ld_on_event(c, AE_EV_KEY_POWER,   20000, d, sizeof d);
+    (void)ae_ld_on_event(c, AE_EV_KEY_VOL_DOWN,20000, d, sizeof d);
+    (void)ae_ld_on_event(c, AE_EV_KEY_POWER,   30000, d, sizeof d); /* el=10s → ARMED */
+    (void)ae_ld_on_event(c, AE_EV_KEY_VOL_UP,  31000, d, sizeof d); /* → LOCKED */
+    return ae_ld_state(c) == AE_LD_LOCKED ? 0 : -1;
+}
+
+static void group_lockdown(void)
+{
+    GROUP("L 安全锁定 / 熔断模式（外部可观测）");
+    char d[1024], why[256];
+
+    /* --- L1 密码强度边界 --- */
+    CHECK(ae_ld_check_strength(LD_PW_OK, why, sizeof why) == 0, "L1 合法 23 位密码通过");
+    CHECK(ae_ld_check_strength("Abc!Def", why, sizeof why) == 1, "L1 过短(<20)拒绝");
+    CHECK(ae_ld_check_strength("Abc!Def@Ghi#Jkl$Mn0PqRsTuVwXyZ1", why, sizeof why) == 1,
+          "L1 过长(>30)拒绝");
+    CHECK(ae_ld_check_strength("abc!def@ghi#jkl$mn0pqrs", why, sizeof why) == 2,
+          "L1 缺大写拒绝");
+    CHECK(ae_ld_check_strength("ABC!DEF@GHI#JKL$MN0PQRS", why, sizeof why) == 3,
+          "L1 缺小写拒绝");
+    CHECK(ae_ld_check_strength("AbcDefGhiJklMn0PqRsTuVw", why, sizeof why) == 4,
+          "L1 缺特殊符号拒绝");
+    CHECK(ae_ld_check_strength("abcdefGhi#Jkl$Mn0PqRsTu", why, sizeof why) == 5,
+          "L1 连续序列>5(abcdef)拒绝");
+    CHECK(ae_ld_check_strength("Abcde!Fgh#Ij$Kl0MnPqRsT", why, sizeof why) == 0,
+          "L1 连续序列=5(bcde 段)仍允许");
+
+    /* --- L2 首启硬门 + 两步设定 + 冷却 + 零存储 --- */
+    ld_fx_t fx;
+    CHECK(ld_setup("l2", &fx) == 0, "L2 建独立运行根");
+    CHECK(ae_ld_state(fx.ld) == AE_LD_UNSET, "L2 初始为 UNSET");
+    CHECK(ae_ld_oobe_gate(fx.ld) == 0, "L2 未设密码：开机硬门不放行");
+    /* 未设密码时组合键完全无效 */
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_POWER, 1000, d, sizeof d);
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_VOL_DOWN, 1000, d, sizeof d);
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_VOL_UP, 11000, d, sizeof d);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_UNSET, "L2 未设密码：组合键无效(硬门)");
+    /* 强度不合格不得进入设定 */
+    CHECK(ae_ld_provision_begin(fx.ld, "short", d, sizeof d, why, sizeof why) == -1,
+          "L2 弱密码设定被拒");
+    /* 合格 → 弹窗回显明文(内存) */
+    CHECK(ae_ld_provision_begin(fx.ld, LD_PW_OK, d, sizeof d, why, sizeof why) == 0,
+          "L2 合格密码进入待确认");
+    CHECK(strstr(d, LD_PW_OK) != NULL, "L2 二次确认弹窗明文回显密码");
+    CHECK(strstr(d, "物理") != NULL && strstr(d, "冷却") != NULL,
+          "L2 弹窗含物理抄录警告 + 冷却提示");
+    /* 冷却窗口：不足 10 秒拒绝，满 10 秒通过 */
+    CHECK(ae_ld_provision_confirm(fx.ld, 1000 + AE_LD_COOLDOWN_MS - 1, why, sizeof why) == -1,
+          "L2 未满 10 秒：确定按钮拒绝");
+    CHECK(!ae_ld_anchor_exists(fx.ld), "L2 冷却未满时验证锚未落盘");
+    CHECK(ae_ld_provision_confirm(fx.ld, 1000 + AE_LD_COOLDOWN_MS, why, sizeof why) == 0,
+          "L2 满 10 秒：设定成功");
+    CHECK(ae_ld_state(fx.ld) == AE_LD_NORMAL, "L2 设定后进入 NORMAL");
+    CHECK(ae_ld_oobe_gate(fx.ld) == 1, "L2 设定后开机硬门放行");
+    /* 零存储：验证锚落盘但密码明文在任何文件中都不存在 */
+    CHECK(ae_ld_anchor_exists(fx.ld), "L2 落盘的是验证锚(非密码)");
+    CHECK(ae_ld_scan_plaintext(fx.ld, LD_PW_OK) == 0,
+          "L2 零存储：全盘扫描无密码明文");
+    /* 不可重置 / 仅首次有效 */
+    CHECK(ae_ld_provision_begin(fx.ld, "Zyx!Vut@Srq#Pon$Ml0KjI", d, sizeof d,
+                                why, sizeof why) == -2, "L2 二次设定被拒(不可重置)");
+    CHECK(strstr(why, "不可重置") != NULL, "L2 拒绝原因如实说明");
+    ld_teardown(&fx);
+
+    /* --- L3 组合键状态机 + 解锁 + 跨重启持久化 --- */
+    CHECK(ld_setup("l3", &fx) == 0, "L3 建独立运行根");
+    CHECK(ae_ld_provision_begin(fx.ld, LD_PW_OK, d, sizeof d, why, sizeof why) == 0, "L3 设定");
+    CHECK(ae_ld_provision_confirm(fx.ld, 1000 + AE_LD_COOLDOWN_MS, why, sizeof why) == 0,
+          "L3 确认");
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_POWER, 20000, d, sizeof d);
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_VOL_DOWN, 20000, d, sizeof d);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_GESTURE, "L3 同按开始 → GESTURE");
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_VOL_UP, 20000 + AE_LD_GESTURE_MS - 1, d, sizeof d);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_NORMAL, "L3 未满 10 秒按音量上：不能进入");
+    /* 重新同按，满 10 秒 → ARMED（超时保持，不自动进入） */
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_POWER, 40000, d, sizeof d);
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_VOL_DOWN, 40000, d, sizeof d);
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_POWER, 40000 + AE_LD_GESTURE_MS, d, sizeof d);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_ARMED, "L3 满 10 秒 → ARMED(待确认)");
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_POWER, 60000, d, sizeof d);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_ARMED, "L3 超时/持续按住保持 ARMED 不自动进入");
+    (void)ae_ld_on_event(fx.ld, AE_EV_KEY_VOL_UP, 61000, d, sizeof d);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_LOCKED, "L3 音量上确认 → 进入安全锁定模式");
+    /* 错误密码无旁路 */
+    CHECK(ae_ld_unlock(fx.ld, "Wrong!Pass@2026#NotOk9x", why, sizeof why) == -1,
+          "L3 错误密码解不开(无找回/无重置)");
+    CHECK(ae_ld_state(fx.ld) == AE_LD_LOCKED, "L3 错误后仍锁定");
+    /* 跨「重启」：关闭再打开同根，状态仍 LOCKED */
+    ae_ld_close(fx.ld); fx.ld = NULL;
+    CHECK(ae_ld_open(fx.st, fx.hal, &fx.ld) == 0, "L3 重新 open(模拟重启)");
+    CHECK(ae_ld_state(fx.ld) == AE_LD_LOCKED, "L3 安全锁定跨重启持久(退不出)");
+    CHECK(ae_ld_unlock(fx.ld, LD_PW_OK, why, sizeof why) == 0,
+          "L3 正确专用密码解锁成功");
+    CHECK(ae_ld_state(fx.ld) == AE_LD_NORMAL, "L3 解锁后回 NORMAL");
+    ld_teardown(&fx);
+
+    /* --- L4 物理红线 → 熔断(连系统抹除 + 报警 + 变砖) --- */
+    {
+        const char *trig[] = {"usb-data", "chassis", "short"};
+        ae_hal_event_t evs[] = {AE_EV_USB_DATA, AE_EV_CHASSIS_OPEN, AE_EV_TESTPOINT_SHORT};
+        int k;
+        for (k = 0; k < 3; k++) {
+            char tag[64]; snprintf(tag, sizeof tag, "l4%d", k);
+            CHECK(ld_setup(tag, &fx) == 0, "L4 建独立运行根");
+            /* 放一个系统本体文件，熔断后应被抹掉（区别于常规 wipe 保留 sys） */
+            CHECK(ae_store_atomic_write(fx.st, AE_ZONE_SYS, "aether.bin",
+                                        "SYSTEM-CORE", 11) == 0, "L4 写入系统本体文件");
+            CHECK(ld_to_locked(fx.ld, fx.hal, LD_PW_OK) == 0, "L4 设定并进入 LOCKED");
+            char bm[256];
+            int fired = ae_ld_on_event(fx.ld, evs[k], 70000, bm, sizeof bm);
+            CHECK(fired == 1, "L4 物理事件触发熔断");
+            CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "L4 状态 BRICKED");
+            CHECK(ae_hal_alarm_count(fx.hal) >= 1, "L4 触发报警机制");
+            CHECK(strstr(ae_hal_alarm_last(fx.hal), trig[k]) != NULL, "L4 报警含触发原因");
+            CHECK(!ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"),
+                  "L4 系统本体被一并抹除(连系统删)");
+            CHECK(ae_store_exists(fx.st, AE_ZONE_LOCKDOWN, "BRICKED"),
+                  "L4 变砖墓碑持久");
+            CHECK(ae_ld_unlock(fx.ld, LD_PW_OK, why, sizeof why) == -3,
+                  "L4 变砖后即使正确密码也退不出");
+            CHECK(ae_ld_oobe_gate(fx.ld) == 0, "L4 变砖后开机硬门永久不放行");
+            /* 跨重启：变砖状态不可恢复 */
+            ae_ld_close(fx.ld); fx.ld = NULL;
+            CHECK(ae_ld_open(fx.st, fx.hal, &fx.ld) == 0, "L4 重新 open");
+            CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "L4 变砖跨重启持久(永久板砖)");
+            ld_teardown(&fx);
+        }
+    }
+
+    /* --- L5 未进入锁定态时物理事件不误触发（三档语义分离） --- */
+    CHECK(ld_setup("l5", &fx) == 0, "L5 建独立运行根");
+    CHECK(ld_to_locked(fx.ld, fx.hal, LD_PW_OK) == 0, "L5 进入 LOCKED 再解锁");
+    CHECK(ae_ld_unlock(fx.ld, LD_PW_OK, why, sizeof why) == 0, "L5 解锁回 NORMAL");
+    char m[256];
+    (void)ae_ld_on_event(fx.ld, AE_EV_USB_DATA, 80000, m, sizeof m);
+    CHECK(ae_ld_state(fx.ld) == AE_LD_NORMAL, "L5 NORMAL 态 USB 事件不误熔断");
+    CHECK(ae_hal_alarm_count(fx.hal) == 0, "L5 无报警");
+    ld_teardown(&fx);
+}
+
 int main(void)
 {
     printf("================ AetherOS Secure Core 全套自测 ================\n");
@@ -418,6 +605,7 @@ int main(void)
     group_triggers();
     group_idle_backoff();
     group_tee_attest();
+    group_lockdown();
     printf("\n================================================================\n");
     printf("  合计: %d PASS / %d FAIL\n", P, F);
     printf("================================================================\n");
