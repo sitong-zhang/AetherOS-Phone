@@ -17,9 +17,12 @@
 | --- | --- |
 | `../scripts/aether.sh` | 六种一键操作统一入口（构建 / 启动 / 关闭 / 重建 / 跑测 / 取证），含 `secure` 转发分支 |
 | `../scripts/secure.sh` | 安全整机一键入口：build / test / demo / evidence / status / shell / all |
-| `../boot/` | 整机引导链路：Linux 内核配置、根文件系统构建、QEMU 启动脚本 |
+| `../boot/README.md` | A 轨整机引导链路：从源码构建到图形首帧、安全自检与开机门禁 |
+| `../boot/build.sh` / `../boot/run-qemu.sh` | 五步交叉编译构建 / QEMU virtio-gpu 冷启动与 QMP 抓帧 |
 | `../tools/collect_baseline.py` | 环境基线采集，输出 JSON |
 | `../tools/gate_l2.py` | 接口层静态机检，规则固定、命中即失败 |
+| `../tools/gate_boot.py` | A 轨开机门禁：串口逐环节 + 图形帧像素统计（10 项） |
+| `../tools/capture_frame.py` | 经 QEMU QMP screendump 抓取 virtio-gpu 真实首帧并做像素判定 |
 | `../tools/render_secure_ui.py` | 由真实运行态快照渲染界面图 |
 
 ## 代码目录

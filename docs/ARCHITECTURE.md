@@ -119,20 +119,26 @@ Waydroid 等开源实现），与主系统自研不冲突。
 已取证的冷启动链路（QEMU aarch64 TCG）：
 
 ```
-QEMU aarch64 (-M virt, TCG)
+QEMU aarch64 (-M virt, TCG, virtio-gpu-pci)
    → Linux 6.6.70 Image 引导（从源码交叉编译）
    → 挂载自建 ext4 根文件系统（virtio-blk /dev/vda）
+   → virtio-gpu DRM probe → /dev/dri/card0 + fbdev emulation /dev/fb0
    → 自研 PID 1 aether-init
-   → 服务编排（aetherosd / bootdiag）
+   → 服务编排（aetherosd / aether-compositor / aether-security / bootdiag）
+   → 合成器打开显示，竖屏画布上屏
+   → 安全引擎设备自证自检（aarch64 静态引擎，attest 签名 + 系统摘要锚）
    → 开机诊断输出真实内核数据源（/proc/version、/proc/meminfo、/proc/uptime）
-   → 开机门禁逐环节断言串口证据
+   → QEMU QMP screendump 抓取真实图形首帧（像素级判定）
+   → 开机门禁逐环节断言串口证据与首帧统计（10/10）
 ```
 
-图形首帧、注入输入改变画面与逐帧取证尚未在 A 轨取证，属后续阶段。用户态合成器当前以
-fbdev 路径构建，QEMU virt 未提供 `/dev/fb0`（诊断输出 `fb0=no`），因此不虚报首帧；
-交互与像素由 B 轨原生上层验证。
+图形首帧已由 QEMU QMP 对 virtio-gpu scanout 真实抓取并通过像素级门禁；合成器以 fbdev
+后端写入 DRM fbdev emulation 提供的 `/dev/fb0`（诊断输出 `fb0=yes dri=card0`）。
+注入输入改变画面与逐帧取证尚未在 A 轨取证，属后续阶段；交互与像素的逐帧验收由 B 轨原生
+上层承担。
 
-构建入口为 `bash boot/build.sh`，冷启动取证为 `bash boot/run-qemu.sh`，门禁机检为
+构建入口为 `bash boot/build.sh`（五步：资产 / 内核 / 用户态 / 安全引擎 / 根盘），冷启动取证为
+`bash boot/run-qemu.sh`，抓帧为 `tools/capture_frame.py`，门禁机检为
 `python3 tools/gate_boot.py`。内核与根文件系统从源码构建，外部资产由 `boot/ASSETS.sha256`
 校验；脚本不依赖机器绝对路径或系统目录写权限。链路细节见
 [`../boot/README.md`](../boot/README.md)。

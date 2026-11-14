@@ -1,0 +1,3 @@
+name=aether-compositor
+exec=/bin/sh /etc/aether/start-compositor.sh
+restart=always

@@ -115,29 +115,45 @@ static int parse_service(const char *path, struct service *s)
         if (strcmp(key, "name") == 0) {
             strncpy(s->name, val, sizeof s->name - 1);
         } else if (strcmp(key, "exec") == 0) {
-            /* 按空格切分 argv（不展开引号，足够本系统使用） */
+            /* 按空格切分 argv（不展开引号，足够本系统使用）。
+             * 逐 token 先截断再复制，保证每个 argv 元素不含空格：
+             * 否则 "cmd arg" 会被整体当作可执行文件路径，execv 必然失败。 */
             char *p = val;
             while (*p && s->nargs < MAX_ARGS) {
                 while (*p == ' ')
-                    *p++ = 0;
+                    p++;
                 if (!*p)
                     break;
-                strncpy(s->exec[s->nargs], p, 255);
-                s->nargs++;
+                char *start = p;
                 while (*p && *p != ' ')
                     p++;
+                char save = *p;
+                *p = 0;
+                strncpy(s->exec[s->nargs], start, sizeof s->exec[s->nargs] - 1);
+                s->exec[s->nargs][sizeof s->exec[s->nargs] - 1] = 0;
+                s->nargs++;
+                if (!save)
+                    break;
+                *p = save;
             }
         } else if (strcmp(key, "depends") == 0) {
             char *p = val;
             while (*p && s->ndep < 8) {
                 while (*p == ' ')
-                    *p++ = 0;
+                    p++;
                 if (!*p)
                     break;
-                strncpy(s->depends[s->ndep], p, 63);
-                s->ndep++;
+                char *start = p;
                 while (*p && *p != ' ')
                     p++;
+                char save = *p;
+                *p = 0;
+                strncpy(s->depends[s->ndep], start, sizeof s->depends[s->ndep] - 1);
+                s->depends[s->ndep][sizeof s->depends[s->ndep] - 1] = 0;
+                s->ndep++;
+                if (!save)
+                    break;
+                *p = save;
             }
         } else if (strcmp(key, "restart") == 0) {
             if (strcmp(val, "always") == 0)

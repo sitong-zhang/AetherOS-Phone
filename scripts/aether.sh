@@ -64,7 +64,7 @@ cmd_build() {
     else
         log "A 轨整机当前【未就绪】：执行 bash boot/build.sh 从源码构建内核与根文件系统"
     fi
-    log "B 轨上层（x86 原生）已可构建；交互/像素验收待上层接入 L2 仿真实现后开展"
+    log "A 轨整机（含 virtio-gpu 图形链路）已可构建；B 轨接口层解耦验收待 L2 仿真实现接入后开展"
 }
 
 cmd_start() {
@@ -166,11 +166,11 @@ cmd_status() {
     log "证据目录：$EVID"
     log "当前实现：$( [ -x "$OUT/l2/test_hal" ] && echo 'L2 已编译' || echo 'L2 未编译' )"
     if a_track_prereqs; then
-        log "A 轨整机：内核镜像与根文件系统齐备，可启动"
+        log "A 轨整机：内核镜像与根文件系统齐备，可启动（virtio-gpu 图形链路 + 安全自检已取证）"
     else
         log "A 轨整机：未就绪（执行 bash boot/build.sh 构建）"
     fi
-    log "B 轨上层：接口层可跑；整机界面待接入 L2 仿真实现（S2）"
+    log "B 轨上层：接口层可跑；接口层解耦验收待接入 L2 仿真实现（S2）"
     log "第 1 门（无设备路径上浮）：FAIL（上层存量设备直连，详见机检输出）"
 }
 
