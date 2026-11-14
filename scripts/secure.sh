@@ -9,13 +9,14 @@ set -o pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${AETHER_OUT:-$ROOT/build}"
-EVID="${AETHER_EVIDENCE:-$ROOT/evidence/round-002}"
+EVID="${AETHER_EVIDENCE:-$ROOT/../aetheros-archive/evidence/round-002}"
 CC="${CC:-gcc}"
 CFLAGS="-std=c11 -O2 -Wall -Wextra -Werror -I$ROOT/secure/include"
 CORE="$ROOT/secure/core/aether_crypto.c $ROOT/secure/core/aether_store.c \
 $ROOT/secure/core/aether_audit.c $ROOT/secure/core/aether_integrity.c \
 $ROOT/secure/core/aether_tee.c $ROOT/secure/core/aether_secure.c \
-$ROOT/secure/core/aether_hal.c $ROOT/secure/core/aether_lockdown.c"
+$ROOT/secure/core/aether_hal.c $ROOT/secure/core/aether_intent.c \
+$ROOT/secure/core/aether_lockdown.c"
 OS_BIN="$OUT/bin/aether-os"
 TEST_BIN="$OUT/bin/test_secure"
 DEMO_ROOT="$OUT/secure-demo"
@@ -163,9 +164,9 @@ case "${1:-}" in
 用法: scripts/secure.sh <命令> [参数]
 
   build     编译 aether-os 主程序 + test_secure（gcc -Werror）
-  test      全套自测(81 项) + OpenSSL 密码学交叉验证
+  test      全套自测 + OpenSSL 密码学交叉验证
   demo      整机 shell 演示流程，导出 3 份真实状态快照 + 4 张界面图 + 销毁证明
-  evidence  汇总证据到 evidence/round-002/
+  evidence  汇总证据到 $AETHER_EVIDENCE（默认仓库外本地归档）
   status    查看整机当前状态
   shell     进入交互式整机 shell（可传 --root/--max-fails/--no-delay 等）
   all       test → demo → evidence 一次跑完

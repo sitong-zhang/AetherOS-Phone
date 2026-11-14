@@ -9,8 +9,9 @@
  */
 #define _GNU_SOURCE
 #include "aether_secure.h"
-#include "aether_hal.h"
+#include "aether_phys_hal.h"
 #include "aether_lockdown.h"
+#include "aether_intent.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -356,7 +357,7 @@ static int ld_unlock(int argc, char **argv)
     printf("%s\n", m);
     return rc;
 }
-/* 事件关键字 → 物理事件（分级判据见 aether_hal.h）。 */
+/* 事件关键字 → 物理事件（分级判据见 aether_phys_hal.h）。 */
 static int ld_parse_event(const char *kind, ae_hal_event_t *out)
 {
     struct { const char *k; ae_hal_event_t ev; } map[] = {
@@ -370,7 +371,7 @@ static int ld_parse_event(const char *kind, ae_hal_event_t *out)
         {"auth-fail",   AE_EV_AUTH_FAIL},
         {"enum",        AE_EV_MASS_ENUM},
         {"core-read",   AE_EV_CORE_READ},
-        /* L3 确认攻击意图（用户钦定红线：立即熔断） */
+        /* L3 确认攻击意图（立即熔断） */
         {"usb",         AE_EV_USB_DATA},        /* USB 数据强插破解 */
         {"core-export", AE_EV_CORE_EXPORT},    /* 核心区/用户数据导出 */
         {"key-tamper",  AE_EV_KEY_TAMPER},     /* 密钥区触碰 */
@@ -413,6 +414,62 @@ static int ld_inject(int argc, char **argv)
     }
     return 0;
 }
+/* 观测 → 意图判定 → 归一化事件 → 状态机（完整链路，外部可观测）。
+ * 用法: ld-observe usb=<...> verb=<...> region=<...> [auth=0|1] [service=0|1]
+ *       [chassis=0|1] [short=0|1] [fails=N] [bulk=N] [key=... ...] [--now <ms>]
+ * 未给出任何观测字段时打印用法与内置观测维度。 */
+static int ld_observe(int argc, char **argv)
+{
+    ae_observation_t obs;
+    ae_intent_verdict_t v;
+    ae_observation_reset(&obs);
+    int n_kv = 0;
+    for (int i = 0; i < argc; i++) {
+        if (!strcmp(argv[i], "--now") && i + 1 < argc) { i++; continue; }
+        if (ae_intent_parse_kv(argv[i], &obs) != 0) {
+            printf("ERR 未知观测字段: %s\n", argv[i]);
+            return -1;
+        }
+        n_kv++;
+    }
+    if (n_kv == 0) {
+        printf("用法: ld-observe <key=value ...> [--now <毫秒>]\n"
+               "  usb    : none charge hid mtp mass adb fastboot custom\n"
+               "  verb   : none auth-ok auth-fail enum-query read-public read-core\n"
+               "           export-core write-boot key-access brute flash-dump\n"
+               "  region : none public user-data sys-core key\n"
+               "  auth / service / chassis / short : 0|1   fails / bulk : 整数\n"
+               "  例: ld-observe usb=fastboot verb=export-core region=sys-core auth=0\n");
+        return -1;
+    }
+    if (ae_intent_classify(&obs, &v) != 0) {
+        printf("ERR 意图判定失败\n"); return -1;
+    }
+    printf("观测: usb=%s verb=%s region=%s auth=%s service=%s chassis=%d "
+           "short=%d fails=%u bulk=%u\n",
+           ae_intent_usb_name(obs.usb), ae_intent_verb_name(obs.verb),
+           ae_intent_region_name(obs.region), obs.auth_ok ? "ok" : "no",
+           obs.service_credential ? "yes" : "no", obs.chassis_open,
+           obs.testpoint_short, obs.auth_fails, obs.bulk_read_bytes);
+    printf("判定: [%s] 规则=%s 归一化事件=%s\n  理由: %s\n",
+           ae_hal_threat_name(v.threat), v.rule,
+           ae_hal_event_name(v.event), v.reason);
+    /* 判定等级与归一化事件必须一致（判定层不产生自相矛盾的判决）。 */
+    if (v.threat != AE_THREAT_SERVICE &&
+        ae_hal_event_threat(v.event) != v.threat) {
+        printf("ERR 判定等级与归一化事件不一致（内部一致性失败）\n");
+        return -1;
+    }
+    uint64_t now = ld_arg_now(argc, argv, ae_hal_now_ms(g_hal));
+    char m[512];
+    (void)ae_hal_inject(g_hal, v.event);
+    int fired = ae_ld_on_event(g_ld, v.event, now, m, sizeof m);
+    printf("动作: %s\n  状态=%s | 证据=%u | 硬件熔断=%s\n",
+           m, ae_ld_state_name(g_ld), ae_ld_evidence_count(g_ld),
+           ae_ld_hw_fuse_burned(g_ld) ? "已锁存(云端仿真)" : "无");
+    if (fired) printf("  >>> 确认攻击意图：软件抹除 + 烧毁硬件指令\n");
+    return 0;
+}
 
 static int cmd_help(ae_secure_t *s, int argc, char **argv)
 {
@@ -437,9 +494,11 @@ static int cmd_help(ae_secure_t *s, int argc, char **argv)
       "  ld-status                                     查看锁定状态/硬门/物理后端\n"
       "  ld-gesture   [--now <毫秒>]                   组合键：电源+音量下满10秒+音量上确认\n"
       "  ld-unlock    --pw <专用密码>                  用专用密码退出安全锁定模式\n"
-      "  ld-inject    <事件> [--now ...]               注入物理事件(分级判据)\n"
+      "  ld-inject    <事件> [--now ...]               注入已归一化的物理事件(状态机测试入口)\n"
       "      L1无害零删除: charge chassis short service | L2取证零删除: adb auth-fail enum core-read\n"
       "      L3攻击意图→软件抹除+烧毁硬件: usb core-export key-tamper short-core\n"
+      "  ld-observe   <key=value ...> [--now ...]       观测→攻击意图判定→动作(完整链路)\n"
+      "      usb= verb= region= auth= service= chassis= short= fails= bulk=（ld-observe 无参看全表）\n"
       "  help / exit                                  帮助 / 退出\n");
     return 0;
 }
@@ -464,6 +523,7 @@ static int dispatch(ae_secure_t *s, const char *cmd, int argc, char **argv)
     else if (!strcmp(cmd,"ld-gesture"))   return ld_wrap(s,argc,argv,ld_gesture);
     else if (!strcmp(cmd,"ld-unlock"))    return ld_wrap(s,argc,argv,ld_unlock);
     else if (!strcmp(cmd,"ld-inject"))    return ld_wrap(s,argc,argv,ld_inject);
+    else if (!strcmp(cmd,"ld-observe"))   return ld_wrap(s,argc,argv,ld_observe);
     else if (!strcmp(cmd,"help") || !strcmp(cmd,"?")) return cmd_help(s,argc,argv);
     else { printf("未知命令: %s（输入 help）\n", cmd); return -1; }
 }

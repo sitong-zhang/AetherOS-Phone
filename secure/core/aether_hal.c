@@ -9,7 +9,7 @@
  * 烧 eFuse；ae_hal_hw_fuse_backend() 明确返回 "simulated(cloud-no-physical-fuse)"。
  */
 #define _GNU_SOURCE
-#include "aether_hal.h"
+#include "aether_phys_hal.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -24,7 +24,7 @@ struct ae_hal {
     uint64_t         now_ms;
     uint32_t         alarm_count;
     char             alarm_last[128];
-    uint32_t         evidence_count;      /* L1/L2 事件累计（证据链） */
+    uint32_t         evidence_count;      /* L1/L2 事件记录数（仅取证，不参与判定） */
     char             evidence_last[64];
     int              service_mode;        /* 官方维修白名单 */
     int              hw_fuse_burned;      /* 硬件熔断指令锁存（仿真） */
@@ -80,7 +80,7 @@ ae_threat_t ae_hal_event_threat(ae_hal_event_t ev)
         /* 官方维修白名单 */
         case AE_EV_SERVICE_MODE:
             return AE_THREAT_SERVICE;
-        /* L2 可疑：取证累计，零删除 */
+        /* L2 可疑：记录取证，零删除 */
         case AE_EV_ADB_UNAUTH:
         case AE_EV_AUTH_FAIL:
         case AE_EV_MASS_ENUM:

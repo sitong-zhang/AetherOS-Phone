@@ -2,7 +2,7 @@
 # aether.sh - AetherOS 六种一键操作（v2 §2.2）
 #
 # 所属层：L7 生态与工程 / 构建与运维入口
-# 依赖：bash、gcc、python3（均为基线实测齐备，见 docs/00-BASELINE.md）
+# 依赖：bash、gcc、python3（环境基线由 tools/collect_baseline.py 采集）
 # 对外接口：aether.sh {build|start|stop|rebuild|test|evidence|status} [--track A|B]
 # 不变量：
 #   - 无机器绝对路径：所有路径由脚本自身位置推导，或用 AETHER_OUT 覆盖（§2.4 / §10.3）
@@ -15,7 +15,7 @@ set -o pipefail   # 管道中任一命令失败即判失败，禁止 tee 吞掉�
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${AETHER_OUT:-$ROOT/build}"
-EVID="${AETHER_EVIDENCE:-$ROOT/evidence}"
+EVID="${AETHER_EVIDENCE:-$ROOT/../aetheros-archive/evidence}"
 # 顶层解析轨道参数（函数内取不到脚本位置参数，必须在此处算好）
 TRACK=""
 if [ "${2:-}" = "--track" ]; then TRACK="${3:-}"; fi
@@ -24,7 +24,7 @@ CFLAGS="-std=c11 -O2 -Wall -Wextra -Werror -I$ROOT/l2/include"
 
 log()  { printf '[aether] %s\n' "$*"; }
 die()  { printf '[aether][ERROR] %s\n' "$*" >&2; exit 1; }
-need() { command -v "$1" >/dev/null 2>&1 || die "缺依赖：$1（请先安装，或见 docs/00-BASELINE.md 工具链表）"; }
+need() { command -v "$1" >/dev/null 2>&1 || die "缺依赖：$1"; }
 
 # ---------- 依赖检查 ----------
 check_deps() {
@@ -47,7 +47,7 @@ compile_l2() {
 # ---------- 前置资产检查（A 轨整机，如实报缺什么） ----------
 a_track_prereqs() {
     local missing=0
-    # 内核镜像、根文件系统：本阶段必须从源码构建或提供带校验和的获取脚本（v2 修正 #3）
+    # 内核镜像、根文件系统：须从源码构建或提供带校验和的获取脚本
     if ! find "$ROOT" -name 'Image' -o -name 'bzImage' -o -name 'kernel-android.img' 2>/dev/null | grep -q .; then
         log "缺：内核镜像（未从源码构建，也无带校验和的获取脚本）"
         missing=1
@@ -65,9 +65,9 @@ cmd_build() {
     # A 轨整机链路：如实检查前置，不假装能起
     log "检查 A 轨整机前置资产…"
     if a_track_prereqs; then
-        log "A 轨前置资产齐备（本阶段尚未接入启动脚本，见 S1 待办）"
+        log "A 轨前置资产齐备（启动脚本接入中）"
     else
-        log "A 轨整机当前【未就绪】：内核与根文件系统尚未从源码自建（S1 待办，见 docs/00-BASELINE.md 差异第 4 条）"
+        log "A 轨整机当前【未就绪】：内核与根文件系统尚未从源码自建"
     fi
     log "B 轨上层（x86 原生）已可构建；交互/像素验收待上层接入 L2 仿真实现后开展"
 }
@@ -160,7 +160,7 @@ cmd_evidence() {
     # 3 改动 diff（git 跟踪范围内）
     git -C "$ROOT" status --short > "$EVID/round-001/changes.status.txt" 2>&1 || true
     git -C "$ROOT" diff --stat     > "$EVID/round-001/changes.diffstat.txt" 2>&1 || true
-    # 4 回归前后对比由 docs/01-STAGE-REPORT.md 承载
+    # 4 回归前后对比由本地归档证据承载
     log "证据文件："
     ls -1 "$EVID/round-001"
 }
@@ -172,7 +172,7 @@ cmd_status() {
     log "当前实现：$( [ -x "$OUT/l2/test_hal" ] && echo 'L2 已编译' || echo 'L2 未编译' )"
     log "A 轨整机：未就绪（内核 + 根文件系统待自建，S1）"
     log "B 轨上层：接口层可跑；整机界面待接入 L2 仿真实现（S2）"
-    log "第 1 门（无设备路径上浮）：FAIL，存量 56 处，见 evidence/round-001/gate1-debt.md"
+    log "第 1 门（无设备路径上浮）：FAIL（上层存量设备直连，详见机检输出）"
 }
 
 case "${1:-}" in

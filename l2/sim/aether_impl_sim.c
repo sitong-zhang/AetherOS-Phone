@@ -2,7 +2,7 @@
  * aether_impl_sim.c - L2 十五域云端仿真实现
  *
  * 所属层：L2 接口层（HAL）· 仿真实现分支
- * 依赖：aether_hal.h / aether_hal_config.h / stdlib / string
+ * 依赖：aether_dev_hal.h / aether_hal_config.h / stdlib / string
  * 对外接口：aether_impl_sim（aether_hal_impl_t 常量）
  * 不变量：
  *   1. 纯内存状态，不含任何设备节点路径；真机阶段换实现不改上层（§3.3 / §5.1）
@@ -12,7 +12,7 @@
  *   5. 传感器降频必须上报（rate 字段变化写入状态），不许悄悄变低
  * 对应验收项：§5.2 十五域、§5.3 流控、§5.4 故障注入、§15.2 接口层
  */
-#include "aether_hal.h"
+#include "aether_dev_hal.h"
 #include <stdlib.h>
 #include <string.h>
 

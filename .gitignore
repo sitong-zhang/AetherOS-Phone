@@ -1,7 +1,8 @@
-# 运行产物与取证输出
+# 运行产物与取证输出（证据仅存本地，不纳入产品仓库）
 out/
 build/
 ui-shots/
+evidence/
 *.log
 *.ppm
 *.png
@@ -22,7 +23,3 @@ guest/aetheros-kernel-*.bzImage
 *.keystore
 .env
 *_token*
-
-# 取证证据例外：evidence/ 下的界面图与演示日志属于交付证据，允许入库
-!evidence/**/*.png
-!evidence/**/*.log

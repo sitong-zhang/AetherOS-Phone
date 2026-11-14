@@ -2,9 +2,10 @@
 # build-host.sh - 静态编译 AetherOS 用户态（host x86_64 原生，用于取证验证）
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$ROOT/.." && pwd)"
 SRC="$ROOT/src"
-# 构建产物统一放到其他存储（/root/aether-archive），不污染工作区
-OUT="${AETHER_BUILD:-/root/aether-archive/aether-pc-build/root}"
+# 构建产物统一放到 build/（由 .gitignore 排除），保持工作区整洁
+OUT="${AETHER_BUILD:-$REPO/build/host/root}"
 mkdir -p "$OUT/sbin" "$OUT/bin"
 
 FLAGS="-static -O2 -Wall -Wextra -I$SRC -I/usr/include/libdrm -rdynamic -pthread"

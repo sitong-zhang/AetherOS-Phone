@@ -4,9 +4,10 @@
 # 显示后端仅 fbdev（真实 Limbo 走 /dev/fb0），不链接 libdrm（aarch64 无静态 libdrm）。
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
+REPO="$(cd "$ROOT/.." && pwd)"
 SRC="$ROOT/src"
 CC="${AETHER_CC:-aarch64-linux-gnu-gcc}"
-OUT="${AETHER_BUILD:-/root/aether-archive/aether-aarch64-build/root-min}"
+OUT="${AETHER_BUILD:-$REPO/build/aarch64/root-min}"
 mkdir -p "$OUT/sbin" "$OUT/bin"
 
 # -DAETHER_NO_DRM -DAETHER_MINIMAL: 不编译 DRM 路径，仅 fbdev；规避 aarch64 缺静态 libdrm。

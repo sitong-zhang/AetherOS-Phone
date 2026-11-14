@@ -8,7 +8,7 @@ render_secure_ui.py - 把 AetherOS 整机 shell 导出的「真实运行态快�
 全部来自 aether-os snapshot 导出的真实 JSON，不是手绘概念图；每张图底部
 都标注数据来源。仅视觉外壳（配色/圆角/布局）为渲染层绘制。
 
-用法: python3 tools/render_secure_ui.py --evidence evidence/round-002
+用法: python3 tools/render_secure_ui.py --evidence <证据目录>
 """
 import argparse
 import json
@@ -254,7 +254,7 @@ def render_wipe(state, out, src):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--evidence", default="evidence/round-002")
+    ap.add_argument("--evidence", default="../aetheros-archive/evidence/round-002")
     args = ap.parse_args()
     ev = args.evidence
     def load(name):

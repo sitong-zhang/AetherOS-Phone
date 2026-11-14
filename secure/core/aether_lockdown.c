@@ -7,10 +7,10 @@
  *   熔断档(ae_ld_brick)     : 抹除包括 sys/ 在内的所有区 + 报警 + 软件熔断标记
  *                             + 烧毁硬件指令(硬件熔断)。
  *
- * 熔断触发判据（用户 2026-11-14 澄清 + 评估报告 §4.3/§4.5）：
+ * 熔断触发判据：
  *   **事件只作证据，行为/攻击意图才触发**——不是「插 USB / 开盖 / 碰测试点就删」。
  *   L1 无害   → 记录取证、零删除、保持锁定；
- *   L2 可疑   → 断连+取证累计、进 SUSPECT、零删除；
+ *   L2 可疑   → 断连+记录取证、进 SUSPECT、零删除；
  *   L3 攻击意图(USB破解强插/短接触及核心区/核心区导出/密钥区触碰) → 立即熔断；
  *   维修白名单 → 豁免物理开盖/短接，不豁免 L3 核心区导出（防伪造凭证）。
  *
@@ -64,7 +64,7 @@ static const char *st_name(ae_ld_state_t s)
         case AE_LD_GESTURE: return "GESTURE(组合键计时中)";
         case AE_LD_ARMED:   return "ARMED(满10秒·待音量上确认)";
         case AE_LD_LOCKED:  return "LOCKED(安全锁定模式)";
-        case AE_LD_SUSPECT: return "SUSPECT(可疑·证据累计中·零删除)";
+        case AE_LD_SUSPECT: return "SUSPECT(可疑·仅取证记录·零删除)";
         case AE_LD_BRICKED: return "BRICKED(软件熔断·系统不可恢复·刷机可重装)";
         default:            return "?";
     }
@@ -433,7 +433,8 @@ int ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
             return 0;
         }
 
-        /* L2 可疑：维修白名单下只记录；否则断连+取证累计 → SUSPECT，零删除 */
+        /* L2 可疑：维修白名单下只记录；否则断连+记录取证 → SUSPECT，零删除。
+         * 证据链只作取证与审计，不设自动升级阈值，不参与熔断触发判定。 */
         if (th == AE_THREAT_L2) {
             evidence_append(c, ev, th);
             if (whitelisted) {
@@ -447,7 +448,7 @@ int ae_ld_on_event(ae_ld_t *c, ae_hal_event_t ev, uint64_t now_ms,
             (void)ae_store_atomic_write(c->store, AE_ZONE_LOCKDOWN, MODE_FILE,
                                         AE_LD_MODE_SUSPECT, 7);
             if (msg&&n) snprintf(msg,n,
-                "L2 可疑行为(%s)：断连+取证累计=%u、进入 SUSPECT、零删除",
+                "L2 可疑行为(%s)：断连+记录取证(累计 %u 条)、进入 SUSPECT、零删除",
                 ae_hal_event_name(ev), ae_ld_evidence_count(c));
             return 0;
         }

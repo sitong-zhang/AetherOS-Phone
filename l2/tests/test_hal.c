@@ -2,7 +2,7 @@
  * test_hal.c - L2 接口层自测（§5.4，不启动整机界面）
  *
  * 所属层：L2 接口层（HAL）· 测试入口
- * 依赖：aether_hal.h / stdio / string
+ * 依赖：aether_dev_hal.h / stdio / string
  * 对外接口：main()；退出码 0=全过，非 0=有失败
  * 不变量：
  *   1. 断言只检查实现行为，不修改任何验收期望值（§11.3 红线）
@@ -10,7 +10,7 @@
  *   3. 失败要能复现：每条断言打印 EXPECT/GOT 与域名
  * 对应验收项：§5.3 流控、§5.4 接口自证、§6.2 Gate S2、§15.2 接口层
  */
-#include "aether_hal.h"
+#include "aether_dev_hal.h"
 #include <stdio.h>
 #include <string.h>
 

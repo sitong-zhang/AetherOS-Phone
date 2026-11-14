@@ -1,17 +1,11 @@
-# AetherOS Phone — 客机用户态工程（历史留痕 · 旧 APK 口径）
+# AetherOS 用户态上层工程
 
-> ⚠️ **口径更正（2026-11-14）**：本文件开头及正文描述的是**已被推翻的旧交付形态**
-> ——「内置于 Android APK 的手机系统」。当前产品是**真 Linux 手机 OS、刷开发板/谷歌真机、
-> 不做 APK**（见根目录 `AGENTS.md` 与 `docs/SYSTEM-BLUEPRINT.md`）。
-> 本文件仅因记录「可复用的自研用户态上层」而有价值，**交付形态描述不作当前依据**。
-> 此处的 `guest/src` 源码本身仍是可复用资产（同一份上层源码原则）。
+`guest/` 是 AetherOS 自研用户态上层源码：init、系统服务、显示服务端、渲染、字体、图标、
+桌面与系统应用。该层以纯 C 实现，在 Linux 内核之上直接绘制桌面，不依赖 Android HAL。
+同一份源码用于调试环境的原生构建与真机构建（代码同源）。
 
-AetherOS Phone 是内置于 Android APK（包名 `dev.aether.vm`）中的手机操作系统。宿主 APK
-通过 QEMU 引擎加载 aarch64 客机 Linux 内核与 `system.qcow2` 系统盘；开机后由本工程
-提供的纯 C 用户态直接绘制桌面，无需 Android HAL。
-
-本项目**只存在手机形态**：PC 桌面方案已彻底废弃，界面内不绘制任何鼠标指针，输入仅
-识别触摸屏（`EV_ABS` + `BTN_TOUCH`）与键盘（`EV_KEY`）。
+系统只有手机形态：界面不绘制鼠标指针，输入仅识别触摸屏（`EV_ABS` + `BTN_TOUCH`）与
+键盘（`EV_KEY`）。
 
 ## 组成
 
@@ -55,9 +49,8 @@ bash build-aarch64.sh
 gcc -O2 -I src -o /tmp/test_glass_math tools/test_glass_math.c src/aether-glass.c -lm && /tmp/test_glass_math
 ```
 
-系统盘生成与真机闭环由 `aether-vm` 工程提供：`make_system_v6.sh` 把 aarch64 合成器
-注入 ext4 系统盘并做 SHA-256 / 权限 / `e2fsck` 校验，`host/run_v6.sh` 用 QEMU TCG
-真实开机、逐帧导出取证。
+aarch64 交叉编译产物供整机引导链路注入 ext4 根文件系统，构建与启动入口见
+`../boot/README.md` 与根目录 `scripts/aether.sh`。
 
 ## 输入
 

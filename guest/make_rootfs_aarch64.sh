@@ -7,9 +7,10 @@
 #   - 串口诊断用 /dev/console（aarch64 PL011 映射到 ttyAMA0）
 set -e
 ROOT="$(cd "$(dirname "$0")" && pwd)"
-BUILD="${AETHER_BUILD:-/root/aether-archive/aether-aarch64-build}"
+REPO="$(cd "$ROOT/.." && pwd)"
+BUILD="${AETHER_BUILD:-$REPO/build/aarch64}"
 STAGE="$BUILD/stage"
-BB="${BB_DIR:-/root/aether-archive/aether-pc-build/busybox/_install}"
+BB="${BB_DIR:-$REPO/build/host/busybox/_install}"
 BIN="${BIN_DIR:-$BUILD/root}"
 IMG="${ROOTFS:-$BUILD/aetheros-phone-aarch64.ext4}"
 SIZE="${SIZE:-256}"   # MB

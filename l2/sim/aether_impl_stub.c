@@ -2,7 +2,7 @@
  * aether_impl_stub.c - L2 桩实现（机检第四门「实现可替换」用）
  *
  * 所属层：L2 接口层（HAL）· 桩实现分支
- * 依赖：aether_hal.h / stdlib / string
+ * 依赖：aether_dev_hal.h / stdlib / string
  * 对外接口：aether_impl_stub（aether_hal_impl_t 常量）
  * 不变量：
  *   1. 与 sim 实现接口完全一致，仅行为不同；上层目标文件编译两次哈希必须一致（§5.6 第四门）
@@ -10,7 +10,7 @@
  *   3. 能力查询必须如实返回 PRESENT=0，不许假装能力存在（§11.2 第 5 类静默失败）
  * 对应验收项：§5.4 实现切换开关、§5.6 机检第四门、§15.2 切换实现
  */
-#include "aether_hal.h"
+#include "aether_dev_hal.h"
 #include <stdlib.h>
 #include <string.h>
 

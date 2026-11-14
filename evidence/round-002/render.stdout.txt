@@ -1,5 +1,0 @@
-已生成: /workspace/AetherOS-Phone/evidence/round-002/01-锁屏与失败计数.png
-已生成: /workspace/AetherOS-Phone/evidence/round-002/02-安全中心.png
-已生成: /workspace/AetherOS-Phone/evidence/round-002/03-解锁桌面与加密保险库.png
-已生成: /workspace/AetherOS-Phone/evidence/round-002/04-全盘数据销毁告警.png
-共 4 张，全部由真实运行态快照驱动。

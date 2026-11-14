@@ -11,7 +11,8 @@
 #define _GNU_SOURCE
 #include "aether_secure.h"
 #include "aether_lockdown.h"
-#include "aether_hal.h"
+#include "aether_phys_hal.h"
+#include "aether_intent.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -417,7 +418,7 @@ static void group_tee_attest(void)
  *   - 仅专用密码可解锁，错误密码无旁路
  *   - 熔断分级判据：L1无害/L2可疑 零删除；仅 L3 确认攻击意图才软件抹除+烧毁硬件
  *   - 状态跨「重启」（重新 open）持久化，软件熔断不可在本系统内恢复
- * 组 M：评估报告 §4.5 验收 A1–A8（外部可观测）
+ * 组 M：分级判据验收 A1–A8（外部可观测）
  *   - A1 充电、A2 开盖、A3 维修短接 均零删除；A4 ADB 进 SUSPECT 零删除
  *   - A5 SUSPECT 后核心区导出才熔断；A6 维修白名单全程不熔断
  *   - A7 软件熔断后重启系统不可恢复(刷机可重装)；A8 云端无物理防拆硬件如实标注
@@ -554,7 +555,7 @@ static void group_lockdown(void)
     CHECK(ae_ld_state(fx.ld) == AE_LD_NORMAL, "L3 解锁后回 NORMAL");
     ld_teardown(&fx);
 
-    /* --- L4 用户钦定红线：仅 L3「确认攻击意图」→ 软件熔断 + 烧毁硬件 ---
+    /* --- L4 仅 L3「确认攻击意图」→ 软件熔断 + 烧毁硬件 ---
      * 物理事件不再是「即熔断」；只有触及用户数据/系统核心区且判定攻击意图的
      * L3 事件才立即摧毁系统 + 烧毁硬件（USB破解强插/核心区导出/密钥触碰/短接取核心数据）。 */
     {
@@ -613,10 +614,10 @@ static int m_ready(ld_fx_t *fx, const char *tag)
     return 0;
 }
 
-/* 组 M：评估报告 §4.5 验收 A1–A8（分级判据，外部可观测，用户 11-14 澄清） */
+/* 组 M：分级判据验收 A1–A8（外部可观测） */
 static void group_assessment_A(void)
 {
-    GROUP("M 评估报告 §4.5 A1–A8（事件只作证据·攻击意图才熔断）");
+    GROUP("M 分级判据验收（事件只作证据·攻击意图才熔断）");
     char d[1024];
     ld_fx_t fx;
 
@@ -701,6 +702,142 @@ static void group_assessment_A(void)
     ld_teardown(&fx);
 }
 
+/* ================================================================
+ * 组 N：攻击意图判定层（观测→判定→事件→状态机）+ 误判率测试集
+ *   N1 判据不再等于「事件名」：给定一段 USB 枚举/命令流/访问区域/鉴权结果，
+ *      由 ae_intent_classify() 推导等级；仅「触及核心资产 + 破解/导出行为」才 L3。
+ *   N2 纯函数确定性、判定等级与归一化事件一致性。
+ *   N3 维修白名单不豁免 L3 核心区导出。
+ *   N4 端到端：无害观测喂进 LOCKED 零删除；攻击观测才熔断。
+ * ================================================================ */
+struct obs_case {
+    const char *name;
+    ae_observation_t o;
+    ae_threat_t want;
+};
+#define O(...) { __VA_ARGS__ }
+static const struct obs_case g_obs_cases[] = {
+    /* --- L1 无害：一条 USB 线插上、充电、维修开盖/短接，零删除 --- */
+    {"N-L1 仅充电",                 O(.usb=AE_USB_CHARGE_ONLY), AE_THREAT_L1},
+    {"N-L1 充电配件 HID",           O(.usb=AE_USB_HID), AE_THREAT_L1},
+    {"N-L1 已鉴权 MTP 常规传输",    O(.usb=AE_USB_MTP,.verb=AE_VERB_READ_PUBLIC,
+                                       .region=AE_REGION_PUBLIC,.auth_ok=1), AE_THREAT_L1},
+    {"N-L1 维修开盖",               O(.chassis_open=1), AE_THREAT_L1},
+    {"N-L1 维修短接未触核心区",     O(.testpoint_short=1), AE_THREAT_L1},
+    {"N-L1 空观测 fail-safe 兜底",  O(), AE_THREAT_L1},
+    /* --- 关键回归：「插了一根线」不含行为特征，绝不升 L3 --- */
+    {"N-L2 仅插入 ADB 线(无命令)",  O(.usb=AE_USB_ADB), AE_THREAT_L2},
+    {"N-L2 仅插入 fastboot 线",     O(.usb=AE_USB_FASTBOOT), AE_THREAT_L2},
+    {"N-L2 未授权调试口枚举查询",   O(.usb=AE_USB_ADB,.verb=AE_VERB_ENUM_QUERY), AE_THREAT_L2},
+    {"N-L2 鉴权连续失败",           O(.usb=AE_USB_ADB,.verb=AE_VERB_AUTH_FAIL,.auth_fails=5), AE_THREAT_L2},
+    {"N-L2 核心区侦察读(未导出)",   O(.usb=AE_USB_ADB,.verb=AE_VERB_READ_CORE,
+                                       .region=AE_REGION_SYS_CORE), AE_THREAT_L2},
+    {"N-L2 大容量存储枚举",         O(.usb=AE_USB_MASS,.verb=AE_VERB_ENUM_QUERY,
+                                       .region=AE_REGION_PUBLIC), AE_THREAT_L2},
+    /* --- SERVICE 官方维修白名单 --- */
+    {"N-SVC 有效维修凭证+开盖短接", O(.service_credential=1,.chassis_open=1,
+                                       .testpoint_short=1), AE_THREAT_SERVICE},
+    /* --- L3 确认攻击意图：核心资产 + 破解/导出/取核心数据行为 --- */
+    {"N-L3 ADB 导出系统核心区",     O(.usb=AE_USB_ADB,.verb=AE_VERB_EXPORT_CORE,
+                                       .region=AE_REGION_SYS_CORE), AE_THREAT_L3},
+    {"N-L3 导出用户数据区",         O(.usb=AE_USB_MASS,.verb=AE_VERB_EXPORT_CORE,
+                                       .region=AE_REGION_USER_DATA), AE_THREAT_L3},
+    {"N-L3 触碰密钥区",             O(.usb=AE_USB_CUSTOM,.verb=AE_VERB_KEY_ACCESS,
+                                       .region=AE_REGION_KEY), AE_THREAT_L3},
+    {"N-L3 全盘镜像抓取",           O(.usb=AE_USB_CUSTOM,.verb=AE_VERB_FLASH_DUMP), AE_THREAT_L3},
+    {"N-L3 拆机短接取核心数据",     O(.testpoint_short=1,.region=AE_REGION_USER_DATA), AE_THREAT_L3},
+    {"N-L3 fastboot 解锁写引导",    O(.usb=AE_USB_FASTBOOT,.verb=AE_VERB_WRITE_BOOT,
+                                       .region=AE_REGION_SYS_CORE), AE_THREAT_L3},
+    {"N-L3 反复爆破密钥区",         O(.usb=AE_USB_CUSTOM,.verb=AE_VERB_BRUTE,
+                                       .region=AE_REGION_KEY), AE_THREAT_L3},
+    /* --- 白名单不豁免 L3 --- */
+    {"N-L3 白名下仍导出核心区",     O(.service_credential=1,.usb=AE_USB_ADB,
+                                       .verb=AE_VERB_EXPORT_CORE,.region=AE_REGION_SYS_CORE), AE_THREAT_L3},
+};
+#undef O
+
+static void group_intent(void)
+{
+    GROUP("N 攻击意图判定层 · 误判率测试集（观测→判定→事件）");
+    size_t i;
+    int mis = 0, l3 = 0, non_l3 = 0;
+
+    /* 逐例判定 + 一致性 + 确定性，统计误判率 */
+    for (i = 0; i < sizeof(g_obs_cases)/sizeof(g_obs_cases[0]); i++) {
+        ae_intent_verdict_t v, v2;
+        const struct obs_case *c = &g_obs_cases[i];
+        CHECK(ae_intent_classify(&c->o, &v) == 0, "N 判定函数返回成功");
+        if (v.threat != c->want) {
+            printf("  ✗ FAIL: 误判 %s 期望=%s 实际=%s 规则=%s\n", c->name,
+                   ae_hal_threat_name(c->want), ae_hal_threat_name(v.threat), v.rule);
+            F++; mis++;
+        } else P++;
+        /* 判定等级与归一化事件必须一致（状态机据此分级动作） */
+        CHECK(v.threat == AE_THREAT_SERVICE ||
+              ae_hal_event_threat(v.event) == v.threat, "N 判定等级==归一化事件等级");
+        /* 纯函数确定性：同一观测两次恒等 */
+        CHECK(ae_intent_classify(&c->o, &v2) == 0 && v2.threat == v.threat &&
+              v2.event == v.event && !strcmp(v2.rule, v.rule), "N 纯函数确定性");
+        if (c->want == AE_THREAT_L3) l3++; else non_l3++;
+    }
+    {
+        char c[160];
+        snprintf(c, sizeof c, "N 误判率测试集: %zu 例(L3=%d/非L3=%d) 误判=%d",
+                 sizeof(g_obs_cases)/sizeof(g_obs_cases[0]), l3, non_l3, mis);
+        CHECK(mis == 0, c);
+        printf("  %s → 误判率 %.2f%%\n", c,
+               (double)mis * 100.0 / (double)(sizeof(g_obs_cases)/sizeof(g_obs_cases[0])));
+    }
+    /* fail-safe 硬断言：所有非 L3 用例一律不得判成 L3（误判一次即毁机） */
+    {
+        int bad = 0;
+        for (i = 0; i < sizeof(g_obs_cases)/sizeof(g_obs_cases[0]); i++) {
+            ae_intent_verdict_t v;
+            (void)ae_intent_classify(&g_obs_cases[i].o, &v);
+            if (g_obs_cases[i].want != AE_THREAT_L3 && v.threat == AE_THREAT_L3) bad++;
+        }
+        CHECK(bad == 0, "N fail-safe: 非攻击观测 0 例被误判为 L3");
+    }
+    /* key=value 解析正确性 */
+    {
+        ae_observation_t o; ae_observation_reset(&o);
+        CHECK(ae_intent_parse_kv("usb=fastboot", &o) == 0 && o.usb == AE_USB_FASTBOOT, "N kv 解析 usb");
+        CHECK(ae_intent_parse_kv("verb=export-core", &o) == 0 && o.verb == AE_VERB_EXPORT_CORE, "N kv 解析 verb");
+        CHECK(ae_intent_parse_kv("region=sys-core", &o) == 0 && o.region == AE_REGION_SYS_CORE, "N kv 解析 region");
+        CHECK(ae_intent_parse_kv("service=1", &o) == 0 && o.service_credential == 1, "N kv 解析 service");
+        CHECK(ae_intent_parse_kv("nonsense=1", &o) == -1, "N kv 未知键严格报错");
+        CHECK(ae_intent_parse_kv("no-equals", &o) == -1, "N kv 无等号报错");
+        CHECK(ae_intent_classify(NULL, NULL) == -1, "N 空指针防护");
+    }
+    /* 端到端：判定结果喂进 LOCKED 状态机，无害零删除 / 攻击才熔断 */
+    {
+        char d[1024];
+        ld_fx_t fx;
+        ae_intent_verdict_t v;
+        /* 无害：仅插入 fastboot 线（无命令）→ L2 → 零删除 */
+        ae_observation_t benign = {.usb = AE_USB_FASTBOOT};
+        CHECK(m_ready(&fx, "nben") == 0, "N 建根并进 LOCKED");
+        CHECK(ae_intent_classify(&benign, &v) == 0 && v.threat == AE_THREAT_L2,
+              "N 仅插线判定=L2 可疑");
+        CHECK(ae_ld_on_event(fx.ld, v.event, 70000, d, sizeof d) == 0, "N 仅插线不熔断");
+        CHECK(ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), "N 仅插线 sys/ 零删除");
+        CHECK(ae_ld_hw_fuse_burned(fx.ld) == 0, "N 仅插线不触发硬件熔断");
+        ld_teardown(&fx);
+        /* 攻击：同一根线开始导出核心区 → L3 → 立即熔断 */
+        ae_observation_t attack = {.usb = AE_USB_FASTBOOT,
+                                   .verb = AE_VERB_EXPORT_CORE,
+                                   .region = AE_REGION_SYS_CORE};
+        CHECK(m_ready(&fx, "natk") == 0, "N 建根并进 LOCKED");
+        CHECK(ae_intent_classify(&attack, &v) == 0 && v.threat == AE_THREAT_L3,
+              "N 核心区导出判定=L3 确认攻击意图");
+        CHECK(ae_ld_on_event(fx.ld, v.event, 70000, d, sizeof d) == 1, "N 判定出的事件触发熔断");
+        CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "N 状态 BRICKED");
+        CHECK(!ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), "N 连系统抹除");
+        CHECK(ae_ld_hw_fuse_burned(fx.ld) == 1, "N 烧毁硬件指令已锁存");
+        ld_teardown(&fx);
+    }
+}
+
 int main(void)
 {
     printf("================ AetherOS Secure Core 全套自测 ================\n");
@@ -714,6 +851,7 @@ int main(void)
     group_tee_attest();
     group_lockdown();
     group_assessment_A();
+    group_intent();
     printf("\n================================================================\n");
     printf("  合计: %d PASS / %d FAIL\n", P, F);
     printf("================================================================\n");

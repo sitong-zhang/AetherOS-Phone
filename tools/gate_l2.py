@@ -33,7 +33,7 @@ RULES_VERSION = "v2-5.6-1"
 
 # 白名单：L2 实现允许包含的头（标准库 + 自身接口头 + 配置头）
 ALLOWED_INCLUDES = {
-    "aether_hal.h", "aether_hal_config.h",
+    "aether_dev_hal.h", "aether_hal_config.h",
     "stdio.h", "stdlib.h", "string.h", "stdint.h", "stddef.h",
 }
 
@@ -147,7 +147,7 @@ def gate2_cross_layer(repo):
 
 
 def gate3_interface_coverage(repo):
-    hdr = os.path.join(repo, 'l2', 'include', 'aether_hal.h')
+    hdr = os.path.join(repo, 'l2', 'include', 'aether_dev_hal.h')
     core = os.path.join(repo, 'l2', 'sim', 'aether_hal_core.c')
     htext = read(hdr) if os.path.exists(hdr) else ''
     ctext = read(core) if os.path.exists(core) else ''
@@ -182,7 +182,7 @@ def gate4_impl_swappable(repo):
     os.makedirs(build, exist_ok=True)
     probe = os.path.join(build, 'upper_probe.c')
     with open(probe, 'w', encoding='utf-8') as f:
-        f.write('#include "aether_hal.h"\n'
+        f.write('#include "aether_dev_hal.h"\n'
                 'int upper_probe(aether_dom_t d){aether_caps_t c;return aether_hal_caps(d,&c);}\n')
 
     objs = []
@@ -300,14 +300,14 @@ def main():
         "governance": "规则固定；执行方不得修改阈值/期望值自证通过（§11.3）。",
     }
     if not args.human_only:
-        out = os.path.abspath(args.out or os.path.join(repo, 'evidence', 'round-001', 'gate_l2.json'))
+        out = os.path.abspath(args.out or os.path.join(repo, '..', 'aetheros-archive', 'evidence', 'round-001', 'gate_l2.json'))
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'w', encoding='utf-8') as f:
             json.dump(d, f, ensure_ascii=False, indent=2, sort_keys=True)
             f.write('\n')
     print(human_report(d))
     if not args.human_only:
-        print(f"\n[gate] JSON -> {args.out or os.path.join(repo, 'evidence', 'round-001', 'gate_l2.json')}")
+        print(f"\n[gate] JSON -> {os.path.abspath(args.out or os.path.join(repo, '..', 'aetheros-archive', 'evidence', 'round-001', 'gate_l2.json'))}")
     # 有任一门不通过即返回非零（如实，不掩盖）
     return 0 if d['all_passed'] else 1
 

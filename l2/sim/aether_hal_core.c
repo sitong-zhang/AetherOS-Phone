@@ -2,7 +2,7 @@
  * aether_hal_core.c - L2 接口层统一调度核心
  *
  * 所属层：L2 接口层（HAL）
- * 依赖：aether_hal.h / aether_hal_config.h / string.h / stdio.h
+ * 依赖：aether_dev_hal.h / aether_hal_config.h / string.h / stdio.h
  * 对外接口：aether_hal_* 全部函数
  * 不变量：
  *   1. 本文件不含任何 /dev/、/sys/class/、/proc/ 直连（§4.2 第 2 条 / §5.6 第一门）
@@ -12,7 +12,7 @@
  *   5. 关键事件（按下/抬起、注册失败、掉电、状态跳变）绝不因背压被丢弃
  * 对应验收项：§5.3 流控与背压、§5.4 接口自证、§5.6 五门机检、§15.2 接口层
  */
-#include "aether_hal.h"
+#include "aether_dev_hal.h"
 #include <string.h>
 #include <stdio.h>
 

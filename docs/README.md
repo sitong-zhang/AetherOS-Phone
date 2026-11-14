@@ -1,62 +1,40 @@
-# docs/ —— 工程文档索引（文档地图）
+# 文档索引
 
-本目录收录 AetherOS 主线的工程文档。仓库总览见根目录 [`README.md`](../README.md)。
-当前唯一需求源为《AetherOS 需求总文件 v2》；「自包含 APK 内嵌虚拟机」旧交付形态已归档停用
-（见 [`../vm/DEPRECATED.md`](../vm/DEPRECATED.md)）。产品是**真 Linux 手机 OS、刷开发板/谷歌真机、不做 APK**。
+本目录收录 AetherOS 的产品规格与架构文档。仓库总览见根目录 [`README.md`](../README.md)，
+工程约定见 [`AGENTS.md`](../AGENTS.md)。
 
-> 为避免文档散乱/口径冲突，文档分两类：**当前有效规范**（判向以此为准）
-> 与 **历史留痕**（如实记录当时状态，不作当前验收依据）。冲突时：V2 总文件 > 蓝图/有效规范 > 历史留痕。
-
-## 当前有效规范
+## 产品规格与架构
 
 | 文档 | 内容 |
 | --- | --- |
-| [`SYSTEM-BLUEPRINT.md`](SYSTEM-BLUEPRINT.md) | **系统蓝图（单一真相源）**：要构建什么系统、整体思路、八层分层、双轨、目录地图、真实状态、阶段路线、诚实边界 |
-| [`ASSESSMENT-RESPONSE-001.md`](ASSESSMENT-RESPONSE-001.md) | 对《系统评估报告 2026-11-14》V1–V17/§4/§5 逐条研判（含「R&D 内核非产品内核」对象错位纠正） |
-| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 八层架构、双轨、L2 十五域接口、§5.6 五门机检、阶段与门禁、参数治理、真机路线 |
-| [`SECURITY-BASELINE.md`](SECURITY-BASELINE.md) | **安全设计基线**：口号、威胁模型、三档数据保护、H1–H8 加固、安全锁定/熔断完整规格（零存储专用密码·10秒冷却·组合键·**攻击意图分级+软件/硬件熔断**）、逐条验收 |
-| 根目录 [`AGENTS.md`](../AGENTS.md) / [`CLAUDE.md`](../CLAUDE.md) | 项目定位与工程铁律（真系统/刷真机/不做 APK） |
+| [`SYSTEM-BLUEPRINT.md`](SYSTEM-BLUEPRINT.md) | 系统蓝图（单一真相源）：定位、整体思路、八层分层、双轨验证、安全主线、目录职责、阶段状态、工程边界、复现命令 |
+| [`ARCHITECTURE.md`](ARCHITECTURE.md) | 八层架构、双轨、十五域接口、静态机检、阶段与门禁、参数治理、真机路线 |
+| [`SECURITY-BASELINE.md`](SECURITY-BASELINE.md) | 安全设计基线：威胁模型、三档数据保护、攻击意图判定层、安全锁定/熔断完整规格、逐条验收口径 |
 
-## 历史留痕（保留可追溯，不作当前验收依据）
-
-| 文档 | 内容 |
-| --- | --- |
-| [`00-BASELINE.md`](00-BASELINE.md) | 本机实测环境基线（v2 §2.1 重填） |
-| [`01-STAGE-REPORT.md`](01-STAGE-REPORT.md) | 第一阶段报告：四件套 + 模块三档状态表 |
-| [`02-SECURE-REPORT.md`](02-SECURE-REPORT.md) | 第二阶段报告：安全整机四件套、缺陷清单、验收证据（当时 81 项，现 252） |
-| [`SECURITY.md`](SECURITY.md) | 旧版安全系统设计：威胁模型、四区隔离、14 项特性 |
-| [`KERNEL.md`](KERNEL.md) | R&D 自研 x86_64 内核架构/引导链坑（**非产品内核**） |
-| [`03-KERNEL-STUDY.md`](03-KERNEL-STUDY.md) | 第三轮：开源 OS 教程调研与取舍 |
-| [`04-KERNEL-REPORT.md`](04-KERNEL-REPORT.md) | 第四轮：R&D 内核 ring3 demo（QEMU TCG 软件模拟）轮次报告 |
-| [`../guest/AetherOS-系统进度说明.md`](../guest/AetherOS-系统进度说明.md) | 历史阶段 1–5 各模块状态（旧 APK 口径，仅供追溯） |
-| [`../guest/OPENSOURCE-ATTRIBUTION.md`](../guest/OPENSOURCE-ATTRIBUTION.md) | 图标与第三方开源资产归属、许可证与采用理由 |
-| [`../LICENSE`](../LICENSE) | 仓库许可证 |
-
-## 证据与工程入口
+## 工程入口
 
 | 路径 | 内容 |
 | --- | --- |
-| `../tools/collect_baseline.py` | 环境基线采集（可复现，输出 JSON） |
-| `../tools/gate_l2.py` | §5.6 五门机检，规则固定、命中即失败、不设豁免 |
-| `../scripts/aether.sh` | §2.2 六种一键操作统一入口（另有 `secure` 转发分支） |
-| `../scripts/secure.sh` | 安全整机一键入口：build/test/demo/evidence/status/shell/all |
-| `../scripts/kernel.sh` | 自研内核一键入口：build/test/evidence/gate（QEMU TCG 真启动 + 取证 + 门禁） |
-| `../tools/render_secure_ui.py` | 由真实运行态快照渲染界面图（取证，非概念图） |
-| `../tools/kernel_qemu_driver.py` | 内核 QEMU 驱动：unix socket 串口 + QMP 真实 VGA 帧缓冲取证 + 结构化断言 |
-| `../tools/gate_kernel.py` | 内核六门机检：构建/密码学/隔离/参数单一源/可复现/Multiboot |
-| `../kernel/` | 自研 x86_64 内核：引导/分页/驱动/系统调用/ring3 init/内核态安全 |
-| `../l2/` | L2 接口层：定义、仿真/桩实现、自测 |
-| `../secure/` | 安全整机本体：密码学、存储、认证、保险库、自毁、审计、CLI、自测 |
-| `../evidence/round-001/` | 第一轮四件套证据与第 1 门存量命中归因清单 |
-| `../evidence/round-002/` | 第二轮：安全整机自测（当时 81 项）、OpenSSL 交叉验证、整机演示日志、快照、销毁证明 |
-| `../evidence/round-003/` | 第三轮 R&D 内核：QEMU TCG 串口全程、VGA 帧缓冲截图、销毁证明、断言 JSON |
-| `../evidence/round-004/` | 第四轮：安全锁定/熔断首版 + 物理安全 HAL + 安全设计基线 |
-| `../evidence/round-005/` | 第五轮：熔断「攻击意图分级」+ 软件/硬件熔断 + 评估报告 A1–A8 验收取证（252 项自测） |
+| `../scripts/aether.sh` | 六种一键操作统一入口（构建 / 启动 / 关闭 / 重建 / 跑测 / 取证），含 `secure` 转发分支 |
+| `../scripts/secure.sh` | 安全整机一键入口：build / test / demo / evidence / status / shell / all |
+| `../boot/` | 整机引导链路：Linux 内核配置、根文件系统构建、QEMU 启动脚本 |
+| `../tools/collect_baseline.py` | 环境基线采集，输出 JSON |
+| `../tools/gate_l2.py` | 接口层静态机检，规则固定、命中即失败 |
+| `../tools/render_secure_ui.py` | 由真实运行态快照渲染界面图 |
+
+## 代码目录
+
+| 路径 | 内容 |
+| --- | --- |
+| `../secure/` | 用户态安全整机：密码学、隔离存储、认证、保险库、销毁引擎、审计链、TEE 锚点、设备自证、攻击意图判定层、物理安全接口、安全锁定/熔断、CLI、全套自测 |
+| `../guest/` | 自研用户态上层：init、合成器、渲染、字体、图标、桌面与系统应用 |
+| `../l2/` | 十五域硬件接口层：接口定义、仿真实现、桩实现、接口自测 |
+| `../guest/OPENSOURCE-ATTRIBUTION.md` | 图标与第三方开源资产归属、许可证与采用理由 |
+| `../LICENSE` | 仓库许可证 |
 
 ## 约定
 
-- 状态标注遵循诚实原则：未跑通一律写「部分实现 / 未开始」；读不到的值标 `unknown`，
-  不编造；虚报按不合格处理（v2 §13）。
-- 门禁规则、断言阈值、验收期望值不由执行方修改（v2 §11.3）；改动须留 diff 与回滚点。
-- 一轮只改一类问题（v2 §2.7），改完重跑同一用例 + 冒烟集，通过才计入「已修」。
-- 面向公众的文档使用客观陈述，不出现对话语气、不含访问凭证；不维护独立公网发布页。
+- 能力状态按证据标注：已实现、部分实现、规划中；读不到的值标 `unknown`，不编造。
+- 门禁规则、断言阈值与验收期望值不由实现方修改；改动须保留状态断言与可复现证据。
+- 一轮改动聚焦一类问题，改完重跑同一用例与冒烟集，通过后方计入已修。
+- 文档面向公众，使用客观第三人称陈述，不出现对话语气、内部过程说明或访问凭证。

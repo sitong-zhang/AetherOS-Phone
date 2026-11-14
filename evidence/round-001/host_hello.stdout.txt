@@ -1,2 +1,0 @@
-Hello from AetherOS Phone — 内置于 Android APK 的手机操作系统用户态。
-PID=22224  UID=0
