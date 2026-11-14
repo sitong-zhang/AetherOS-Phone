@@ -265,9 +265,20 @@ def render_wipe_sequence(evdir):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--evidence", default="../aetheros-archive/evidence/round-002")
+    # 默认证据根在仓库内 evidence/（clone 后即存在；实际快照/界面图为现场生成产物，
+    # 不随仓库分发，缺则按 evidence/README.md 复现）。也可用 --evidence 显式指定。
+    ap.add_argument("--evidence", default=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "evidence", "round-002"))
     args = ap.parse_args()
     ev = args.evidence
+
+    if not os.path.isdir(ev):
+        print(f"[render] 证据目录不存在: {ev}")
+        print("  界面图为设计稿渲染产物（不随仓库分发）。请按 evidence/README.md 复现：")
+        print("    1) 在真实/模拟环境采集 state-*.json 快照；")
+        print("    2) python3 tools/render_secure_ui.py --evidence <快照目录>")
+        return 2
 
     def load(name):
         with open(os.path.join(ev, name), encoding="utf-8") as f:

@@ -2,7 +2,9 @@
 out/
 build/
 ui-shots/
-evidence/
+# evidence/ 目录与说明随仓库（可复现路径），实际取证产物（日志/首帧/JSON 快照）不入库
+evidence/*
+!evidence/README.md
 *.log
 *.ppm
 *.png

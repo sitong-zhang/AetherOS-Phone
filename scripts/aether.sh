@@ -15,7 +15,7 @@ set -o pipefail   # 管道中任一命令失败即判失败，禁止 tee 吞掉�
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 OUT="${AETHER_OUT:-$ROOT/build}"
-EVID="${AETHER_EVIDENCE:-$ROOT/../aetheros-archive/evidence}"
+EVID="${AETHER_EVIDENCE:-$ROOT/evidence}"
 # 顶层解析轨道参数（函数内取不到脚本位置参数，必须在此处算好）
 TRACK=""
 if [ "${2:-}" = "--track" ]; then TRACK="${3:-}"; fi

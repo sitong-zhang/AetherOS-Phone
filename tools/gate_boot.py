@@ -57,19 +57,26 @@ def check_frame(frame_json):
 
 def main():
     repo = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-    default_evid = os.path.join(repo, '..', 'aetheros-archive', 'evidence', 'round-009')
+    # 默认证据根在仓库内 evidence/：clone 后由 boot/build.sh + boot/run-qemu.sh 现场生成，
+    # 不依赖仓库外的本地归档路径（避免 clone 即断）。也可用 --log/--frame 显式指定。
+    default_evid = os.path.join(repo, 'evidence', 'round-009')
     ap = argparse.ArgumentParser(description="AetherOS A 轨开机门禁机检")
     ap.add_argument("--log", default=os.path.join(default_evid, 'boot-serial.log'),
                     help="QEMU 串口日志路径")
     ap.add_argument("--frame", default=os.path.join(default_evid, 'first-frame.json'),
                     help="真实图形首帧统计 JSON（tools/capture_frame.py 产出）")
-    ap.add_argument("--out", default=None, help="机检 JSON 输出路径（默认仓库外本地归档）")
+    ap.add_argument("--out", default=None, help="机检 JSON 输出路径（默认仓库内 evidence/round-009）")
     args = ap.parse_args()
 
     out = os.path.abspath(args.out or os.path.join(default_evid, 'gate_boot.json'))
 
     if not os.path.isfile(args.log):
         print(f"[gate_boot] FAIL 串口日志不存在: {args.log}")
+        print("  证据为现场生成产物（不随仓库分发）。请先执行：")
+        print("    bash boot/fetch-assets.sh          # 下载并校验外部资产（内核源码等）")
+        print("    bash boot/build.sh                 # 5 步：内核 + 用户态 + 安全引擎 + 自建根盘")
+        print("    bash boot/run-qemu.sh              # QEMU 冷启动并抓取首帧/串口证据到 evidence/")
+        print("  详见 boot/README.md 的「可复现路径」。")
         result = {"passed": False, "error": "log_missing", "log": args.log,
                   "checks": {}, "forbidden_hits": [], "frame": None}
     else:

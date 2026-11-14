@@ -10,7 +10,7 @@ set -euo pipefail
 BOOT="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$BOOT/.." && pwd)"
 BUILD="${AETHER_BUILD:-$REPO/build/aarch64}"
-EVID="${AETHER_EVIDENCE:-$REPO/../aetheros-archive/evidence/round-009}"
+EVID="${AETHER_EVIDENCE:-$REPO/evidence/round-009}"
 LOG="$EVID/boot-serial.log"
 QMP="$EVID/aether-qmp.sock"
 FRAME_PNG="$EVID/first-frame.png"

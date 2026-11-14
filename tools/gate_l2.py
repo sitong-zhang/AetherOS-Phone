@@ -316,14 +316,14 @@ def main():
         "governance": "规则固定；执行方不得修改阈值/期望值自证通过（§11.3）。",
     }
     if not args.human_only:
-        out = os.path.abspath(args.out or os.path.join(repo, '..', 'aetheros-archive', 'evidence', 'round-001', 'gate_l2.json'))
+        out = os.path.abspath(args.out or os.path.join(repo, 'evidence', 'round-l2', 'gate_l2.json'))
         os.makedirs(os.path.dirname(out), exist_ok=True)
         with open(out, 'w', encoding='utf-8') as f:
             json.dump(d, f, ensure_ascii=False, indent=2, sort_keys=True)
             f.write('\n')
     print(human_report(d))
     if not args.human_only:
-        print(f"\n[gate] JSON -> {os.path.abspath(args.out or os.path.join(repo, '..', 'aetheros-archive', 'evidence', 'round-001', 'gate_l2.json'))}")
+        print(f"\n[gate] JSON -> {os.path.abspath(args.out or os.path.join(repo, 'evidence', 'round-l2', 'gate_l2.json'))}")
     # 有任一门不通过即返回非零（如实，不掩盖）
     return 0 if d['all_passed'] else 1
 

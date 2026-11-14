@@ -132,7 +132,7 @@ QEMU aarch64 (-M virt, TCG, virtio-gpu-pci)
    → 开机门禁逐环节断言串口证据与首帧统计（10/10）
 ```
 
-图形首帧已由 QEMU QMP 对 virtio-gpu scanout 真实抓取并通过像素级门禁；合成器以 fbdev
+真实锁屏首帧已由 QEMU QMP 对 virtio-gpu scanout 真实抓取并通过像素级门禁；合成器以 fbdev
 后端写入 DRM fbdev emulation 提供的 `/dev/fb0`（诊断输出 `fb0=yes dri=card0`）。
 注入输入改变画面与逐帧取证尚未在 A 轨取证，属后续阶段；交互与像素的逐帧验收由 B 轨原生
 上层承担。

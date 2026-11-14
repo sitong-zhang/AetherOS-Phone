@@ -702,6 +702,49 @@ static void group_assessment_A(void)
     ld_teardown(&fx);
 }
 
+/* 组 N2：证据链口径——只作取证与审计，不参与升级判定（复检报告 N2）
+ * 状态机里 evidence_append() 仅记录，证据计数从不进入任何 if 判定；
+ * 升级只由 ae_hal_event_threat(ev)（判定层对新观测的等级）决定。 */
+static void group_evidence_semantics(void)
+{
+    GROUP("N2 证据链口径：只作取证，不参与升级判定（复检报告 N2）");
+    char d[1024];
+    ld_fx_t fx;
+
+    /* N2a：已记录证据的 LOCKED 态，后续新观测是 L1 → 不升级（累计证据不导致熔断） */
+    CHECK(m_ready(&fx, "n2a") == 0, "N2a 建根并进 LOCKED");
+    (void)ae_ld_on_event(fx.ld, AE_EV_USB_CHARGE, 70000, d, sizeof d);  /* L1，记录 1 条 */
+    CHECK(ae_ld_evidence_count(fx.ld) >= 1, "N2a 已记录证据（计数>=1）");
+    (void)ae_ld_on_event(fx.ld, AE_EV_USB_CHARGE, 80000, d, sizeof d);  /* 再次 L1 */
+    CHECK(ae_ld_state(fx.ld) == AE_LD_LOCKED,
+          "N2a 已记录证据 + 新观测 L1 → 不升级（仍 LOCKED）");
+    CHECK(ae_store_exists(fx.st, AE_ZONE_SYS, "aether.bin"), "N2a 零删除");
+    CHECK(ae_ld_hw_fuse_burned(fx.ld) == 0, "N2a 不触发硬件熔断");
+    ld_teardown(&fx);
+
+    /* N2b：证据计数=0（全新根），新观测是 L3 → 立即熔断（升级不要求先累积证据） */
+    CHECK(m_ready(&fx, "n2b") == 0, "N2b 建根并进 LOCKED（证据计数基线）");
+    {
+        int fired = ae_ld_on_event(fx.ld, AE_EV_CORE_EXPORT, 70000, d, sizeof d);
+        CHECK(fired == 1, "N2b 证据计数=0 + 新观测 L3 → 立即熔断");
+        CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "N2b 状态 BRICKED（软件熔断）");
+        CHECK(ae_ld_hw_fuse_burned(fx.ld) == 1, "N2b 硬件熔断指令已锁存");
+    }
+    ld_teardown(&fx);
+
+    /* N2c：升级与否与证据累计无关——先累积证据并进入 SUSPECT（由 L2 威胁等级），再 L3 照常熔断 */
+    CHECK(m_ready(&fx, "n2c") == 0, "N2c 建根并进 LOCKED");
+    (void)ae_ld_on_event(fx.ld, AE_EV_USB_CHARGE, 70000, d, sizeof d);   /* 累积 1 条 L1 证据 */
+    (void)ae_ld_on_event(fx.ld, AE_EV_ADB_UNAUTH, 71000, d, sizeof d);    /* L2 → SUSPECT */
+    CHECK(ae_ld_state(fx.ld) == AE_LD_SUSPECT, "N2c 先累积证据并由 L2 进入 SUSPECT（非计数）");
+    {
+        int fired = ae_ld_on_event(fx.ld, AE_EV_CORE_EXPORT, 80000, d, sizeof d);
+        CHECK(fired == 1, "N2c 已累积证据 + L3 → 照常熔断（升级与累计无关）");
+        CHECK(ae_ld_state(fx.ld) == AE_LD_BRICKED, "N2c 状态 BRICKED");
+    }
+    ld_teardown(&fx);
+}
+
 /* ================================================================
  * 组 N：攻击意图判定层（观测→判定→事件→状态机）+ 误判率测试集
  *   N1 判据不再等于「事件名」：给定一段 USB 枚举/命令流/访问区域/鉴权结果，
@@ -851,6 +894,7 @@ int main(void)
     group_tee_attest();
     group_lockdown();
     group_assessment_A();
+    group_evidence_semantics();
     group_intent();
     printf("\n================================================================\n");
     printf("  合计: %d PASS / %d FAIL\n", P, F);
