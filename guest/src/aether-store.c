@@ -205,15 +205,11 @@ static void store_android(struct aether_win *w, int ox, int oy, int cw, int ch, 
     snprintf(line1, sizeof line1, "兼容层状态：%s", aether_android_state_name(state));
     aether_ui_label(cx + 14, y + 34, line1, C_DIM);
     char line2[128];
-    snprintf(line2, sizeof line2, "pKVM/AVF：%s   安卓运行时：%s",
-             pkvm ? "可用" : "不可用", rootfs ? "已安装" : "未安装");
+    snprintf(line2, sizeof line2, "组件状态：%s", running ? "已就绪" : "未就绪");
     aether_ui_label(cx + 14, y + 56, line2, C_DIM);
-    /* 降级提示（用户路线第 6 点） */
     const char *hint = pkvm ? AANDROID_HINT_ROOTFS : AANDROID_HINT_PKVM;
     aether_ui_fit(line1, sizeof line1, hint, cwid - 28);
     aether_ui_label(cx + 14, y + 82, line1, C_TEXT);
-    aether_ui_fit(line1, sizeof line1, "AetherOS 本体功能不受影响，可正常使用", cwid - 28);
-    aether_ui_label(cx + 14, y + 104, line1, C_DIM);
     y += chh + 20;
 
     /* 分类说明 */
@@ -235,7 +231,7 @@ static void store_android(struct aether_win *w, int ox, int oy, int cw, int ch, 
                     running ? 0xFFFFFFFFu : C_BTN_TX);
     y += bh + 16;
     aether_ui_fit(line1, sizeof line1,
-                  "外层 AVF/pKVM + 内层 LXC/AOSP 容器；当前为内部调试构建，运行时镜像未随包分发。",
+                  "安卓应用兼容环境",
                   cwid - 16);
     aether_ui_label(ox + 14, y, line1, C_DIM);
 }
@@ -297,7 +293,7 @@ static void store_detail(struct aether_win *w, int ox, int oy, int cw, int ch, s
     y += bh + 14;
 
     /* 未知来源 / 说明 */
-    aether_ui_label(ox + 24, y, "本应用来自本机应用市场，已通过本地签名校验。", C_DIM);
+    aether_ui_label(ox + 24, y, "本应用来自本机应用市场。", C_DIM);
     y += 22;
     aether_ui_label(ox + 24, y, "安装后会出现在桌面与抽屉，可随时卸载。", C_DIM);
 

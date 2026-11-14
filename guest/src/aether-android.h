@@ -98,8 +98,8 @@ int aether_android_status_read(char *buf, size_t sz);
  *  "window x y w h\n"      -> 设置浮窗几何
  *  "stop\n"                -> 关闭服务
  */
-#define AANDROID_HINT_PKVM  "安卓兼容层需要更高版本系统（pKVM / AVF 不可用），AetherOS 本体可正常使用"
-#define AANDROID_HINT_ROOTFS "未安装安卓运行时镜像（LineageOS arm64 rootfs），请先在系统设置中安装"
+#define AANDROID_HINT_PKVM  "安卓兼容层暂不可用"
+#define AANDROID_HINT_ROOTFS "请先在系统设置中安装安卓兼容层"
 
 /* ---- compositor 侧桥接 API（链接进 aether-compositor）---- */
 /* 每帧调用：若共享帧可见且 seq 变化，把 buffer 画成桌面浮窗；返回 1 表示画了。 */

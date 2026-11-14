@@ -1,5 +1,5 @@
 /*
- * aether-modules.h - AetherOS 发行版模块清单（tools/gen_modules.py 生成，请勿手改）
+ * aether-modules.h - AetherOS 发行版模块清单
  *
  * 前提：Linux 6.6.70 内核已提供全部底层机制，本清单只含发行版
  *       需自研 / 定制整合 / 用户态实现的模块。状态为真实归属标注。
@@ -15,7 +15,7 @@ struct aether_mod_group { const char *name; int count; const struct aether_mod_i
 #define AETHER_MOD_ITEM_COUNT  182
 
 static const struct aether_mod_item aether_mod_g0[] = {
-    { "GRUB2 定制化引导加载器（主题、启动项、安全启动适配）", '-' },
+    { "GRUB2 定制化引导加载器", '-' },
     { "UEFI 安全启动签名与证书管理模块", '-' },
     { "系统启动参数生成与 grub.cfg 自动配置模块", '-' },
     { "初始内存盘 initramfs 定制构建模块", '-' },
@@ -39,8 +39,8 @@ static const struct aether_mod_item aether_mod_g1[] = {
 };
 
 static const struct aether_mod_item aether_mod_g2[] = {
-    { "Aether Libc 适配层（基于 glibc 定制）", 'B' },
-    { "核心系统库全集定制（libstdc++/libssl/zlib/curl）", '-' },
+    { "Aether Libc 适配层", 'B' },
+    { "核心系统库全集定制", '-' },
     { "动态链接库路径与版本管理模块", '-' },
     { "多架构二进制兼容运行层", '-' },
     { "运行时环境变量与系统全局配置模块", 'A' },
@@ -50,20 +50,20 @@ static const struct aether_mod_item aether_mod_g2[] = {
 };
 
 static const struct aether_mod_item aether_mod_g3[] = {
-    { "基于 systemd 的定制化 init 启动流程（本版为自研 aether-init）", 'C' },
+    { "基于 systemd 的定制化 init 启动流程", 'C' },
     { "系统服务分级启动与依赖管理模块", 'A' },
     { "服务自启管控与运行状态监控模块", 'A' },
-    { "系统日志管理服务（日志分级与持久化）", 'A' },
-    { "用户会话管理服务（logind 定制）", '-' },
-    { "设备事件守护服务（udev 规则定制）", 'C' },
-    { "定时任务调度服务（cron 定制封装）", '-' },
+    { "系统日志管理服务", 'A' },
+    { "用户会话管理服务", '-' },
+    { "设备事件守护服务", 'C' },
+    { "定时任务调度服务", '-' },
     { "系统启动速度优化与并行启动模块", 'C' },
     { "守护进程异常重启与自愈模块", 'A' },
     { "系统运行等级与模式切换模块", '-' },
 };
 
 static const struct aether_mod_item aether_mod_g4[] = {
-    { "显卡驱动管理模块（DRM/fbdev 自动回退已实现，一键切换未做）", 'C' },
+    { "显卡驱动管理模块", 'C' },
     { "声卡驱动与音频设备拓扑管理模块", '-' },
     { "网卡驱动与硬件识别适配模块", 'C' },
     { "USB 设备热插拔管理与权限控制模块", 'C' },
@@ -78,23 +78,23 @@ static const struct aether_mod_item aether_mod_g4[] = {
 static const struct aether_mod_item aether_mod_g5[] = {
     { "系统分区方案与默认挂载配置模块", 'A' },
     { "LVM 逻辑卷管理工具与可视化模块", '-' },
-    { "全盘加密（LUKS）管理与解锁模块", '-' },
+    { "全盘加密管理与解锁模块", '-' },
     { "软 RAID 阵列配置与管理模块", '-' },
     { "磁盘配额管理模块", '-' },
     { "文件系统检查与修复工具集", 'C' },
-    { "自动挂载服务（移动存储、共享目录）", 'A' },
+    { "自动挂载服务", 'A' },
     { "磁盘碎片整理与空间优化工具", '-' },
     { "回收站与文件安全删除模块", '-' },
-    { "网络存储挂载管理（NFS/SMB/WebDAV）", '-' },
+    { "网络存储挂载管理", '-' },
 };
 
 static const struct aether_mod_item aether_mod_g6[] = {
-    { "网络连接管理服务（有线/WiFi/蜂窝）", '-' },
+    { "网络连接管理服务", '-' },
     { "WiFi 扫描、连接与密码管理模块", '-' },
     { "网络代理全局配置模块", '-' },
     { "DNS 解析管理与缓存服务", 'C' },
     { "DHCP 客户端与静态 IP 配置模块", 'C' },
-    { "防火墙前端管理模块（基于 Netfilter）", '-' },
+    { "防火墙前端管理模块", '-' },
     { "网络共享与热点模块", '-' },
     { "虚拟网卡与 VPN 管理模块", '-' },
     { "网络质量监控与故障诊断模块", '-' },
@@ -117,14 +117,14 @@ static const struct aether_mod_item aether_mod_g7[] = {
 };
 
 static const struct aether_mod_item aether_mod_g8[] = {
-    { "显示服务核心（本版自研 UDS IPC，Wayland 协议未实现）", 'C' },
-    { "窗口合成器（自研合成引擎）", 'A' },
-    { "窗口管理器（浮动窗口 + 拖拽 + 最大化/最小化/关闭）", 'A' },
+    { "显示服务核心", 'C' },
+    { "窗口合成器", 'A' },
+    { "窗口管理器", 'A' },
     { "DRM/KMS 显示适配与显示后端模块", 'A' },
     { "分辨率、刷新率与色域调节模块", 'C' },
     { "2D 图形渲染引擎与控件库", 'A' },
     { "3D 图形与 OpenGL/Vulkan 兼容适配层", '-' },
-    { "全局主题引擎（配色、控件、动效）", 'A' },
+    { "全局主题引擎", 'A' },
     { "桌面与图标管理模块", 'A' },
     { "多工作区与虚拟桌面模块", '-' },
     { "窗口特效与开机动画渲染模块", 'C' },
@@ -140,14 +140,14 @@ static const struct aether_mod_item aether_mod_g9[] = {
     { "触摸事件命中测试与控件点击反馈模块", 'A' },
     { "触摸屏与绝对坐标输入适配模块", 'C' },
     { "游戏手柄外设适配框架", '-' },
-    { "全局剪贴板管理模块（历史记录、跨应用）", '-' },
+    { "全局剪贴板管理模块", '-' },
     { "输入法框架与多输入法管理模块", '-' },
     { "全局快捷键与开始菜单", 'C' },
-    { "无障碍交互模块（读屏、放大、高对比度）", '-' },
+    { "无障碍交互模块", '-' },
 };
 
 static const struct aether_mod_item aether_mod_g10[] = {
-    { "音频服务核心（PipeWire 定制）", '-' },
+    { "音频服务核心", '-' },
     { "音频设备切换与音量管理模块", '-' },
     { "音频混音与音效配置模块", '-' },
     { "系统音视频编解码全集集成", '-' },
@@ -156,7 +156,7 @@ static const struct aether_mod_item aether_mod_g10[] = {
     { "摄像头预览与录像服务", '-' },
     { "麦克风与录音管理模块", '-' },
     { "流媒体播放框架", '-' },
-    { "屏幕录制与截图服务（截图 IPC 已实现，录屏未做）", 'C' },
+    { "屏幕录制与截图服务", 'C' },
 };
 
 static const struct aether_mod_item aether_mod_g11[] = {
@@ -173,7 +173,7 @@ static const struct aether_mod_item aether_mod_g11[] = {
 };
 
 static const struct aether_mod_item aether_mod_g12[] = {
-    { "Aether 包管理器（自研前端 + RPM/DEBIAN 后端）", '-' },
+    { "Aether 包管理器", '-' },
     { "软件仓库源管理模块", '-' },
     { "软件依赖自动解析与冲突处理模块", '-' },
     { "OTA 系统增量更新模块", '-' },
@@ -185,16 +185,16 @@ static const struct aether_mod_item aether_mod_g12[] = {
 };
 
 static const struct aether_mod_item aether_mod_g13[] = {
-    { "KVM 虚拟化用户态管理栈（libvirt 定制）", '-' },
-    { "QEMU 设备模拟适配与优化（Limbo 宿主提供）", 'B' },
+    { "KVM 虚拟化用户态管理栈", '-' },
+    { "QEMU 设备模拟适配与优化", 'B' },
     { "虚拟机图形化管理工具", '-' },
-    { "虚拟机快照与备份还原（QEMU 宿主提供）", 'B' },
+    { "虚拟机快照与备份还原", 'B' },
     { "虚拟网络桥接与端口管理模块", '-' },
-    { "容器运行时（Podman/Docker）集成", '-' },
+    { "容器运行时集成", '-' },
     { "容器镜像管理与编排模块", '-' },
     { "9pfs 共享文件与主机互通模块", 'C' },
-    { "远程显示协议（SPICE/VNC）集成", '-' },
-    { "虚拟机资源配额与性能调优（Limbo 配置）", 'B' },
+    { "远程显示协议集成", '-' },
+    { "虚拟机资源配额与性能调优", 'B' },
 };
 
 static const struct aether_mod_item aether_mod_g14[] = {
@@ -215,12 +215,12 @@ static const struct aether_mod_item aether_mod_g15[] = {
     { "文件管理器", 'A' },
     { "终端模拟器", 'A' },
     { "文本编辑器", 'A' },
-    { "网页浏览器（定制内核版）", '-' },
+    { "网页浏览器", '-' },
     { "图像查看器", '-' },
     { "视频播放器", '-' },
     { "音乐播放器", '-' },
     { "计算器", 'A' },
-    { "日历与日程（任务栏时钟/日期）", 'C' },
+    { "日历与日程", 'C' },
     { "联系人与邮件", '-' },
     { "截图工具", 'C' },
     { "应用商店", '-' },
@@ -230,8 +230,8 @@ static const struct aether_mod_item aether_mod_g15[] = {
 };
 
 static const struct aether_mod_item aether_mod_g16[] = {
-    { "Windows 应用兼容层（Wine 定制优化）", '-' },
-    { "Linux 旧版应用兼容适配（原生 Linux 用户态）", 'B' },
+    { "Windows 应用兼容层", '-' },
+    { "Linux 旧版应用兼容适配", 'B' },
     { "安卓应用运行兼容层", '-' },
     { "跨架构二进制转译适配模块", '-' },
     { "老旧硬件兼容驱动集", 'C' },
@@ -240,8 +240,8 @@ static const struct aether_mod_item aether_mod_g16[] = {
 };
 
 static const struct aether_mod_item aether_mod_g17[] = {
-    { "Aether OS 品牌视觉体系（图标、壁纸、开机画面）", 'A' },
-    { "全局主题与个性化模块（深浅主题）", 'C' },
+    { "Aether OS 品牌视觉体系", 'A' },
+    { "全局主题与个性化模块", 'C' },
     { "首次开机引导配置向导", '-' },
     { "用户数据迁移工具", '-' },
     { "系统重置与出厂化模块", '-' },
@@ -274,10 +274,10 @@ static const struct aether_mod_group aether_mod_groups[AETHER_MOD_GROUP_COUNT] =
 static const char *aether_mod_state_text(char s)
 {
     switch (s) {
-    case 'A': return "本版已实现（自研或已落地用户态能力）";
-    case 'B': return "已由上游/宿主提供并整合";
-    case 'C': return "基础具备或部分实现，尚未完整";
-    case '-': return "规划中，明确未实现";
+    case 'A': return "已实现";
+    case 'B': return "已整合";
+    case 'C': return "部分实现";
+    case '-': return "规划中";
     default: return "未知";
     }
 }

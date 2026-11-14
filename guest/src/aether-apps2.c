@@ -137,7 +137,7 @@ static void section(int ox, int y, const char *s)
     aether_ui_label(ox + BODY_PAD, y, s, C_DIM);
 }
 
-/* 空状态：极简插画（开源图标）+ 一句解释 + 一个主操作，不留白 */
+/* 空状态：极简插画（开源图标）+ 一句状态文案 + 一个主操作 */
 static void empty(int ox, int oy, int cw, int ch, int icon,
                   const char *msg, const char *btn, int *bx, int *by, int *bw, int *bh)
 {
@@ -303,9 +303,9 @@ static void browser_load(struct app_state *st)
         push_line(lines, &n, 64, "  [4]  about:help       地址与用法说明");
         push_line(lines, &n, 64, "");
         push_line(lines, &n, 64, "点击上面任一条目，或在地址栏输入本地绝对路径。");
-        push_line(lines, &n, 64, "本浏览器读取真实文件与 /proc，不访问外部网络。");
+        push_line(lines, &n, 64, "本浏览器不访问外部网络。");
     } else if (!strcmp(u, "about:system")) {
-        push_line(lines, &n, 64, "本机实时系统信息  ·  来自 /proc");
+        push_line(lines, &n, 64, "本机系统信息");
         push_line(lines, &n, 64, "--------------------------------------------");
         char b[120];
         FILE *f = fopen("/proc/version", "r");
@@ -340,7 +340,7 @@ static void browser_load(struct app_state *st)
         f = fopen("/proc/loadavg", "r");
         if (f) { if (fgets(b, sizeof b, f)) { size_t L = strlen(b); while (L && b[L-1] < 32) b[--L] = 0; push_line(lines, &n, 64, "系统负载      %s", b); } fclose(f); }
     } else if (!strcmp(u, "about:apps")) {
-        push_line(lines, &n, 64, "已安装可执行程序  ·  真实遍历系统目录");
+        push_line(lines, &n, 64, "已安装应用");
         push_line(lines, &n, 64, "--------------------------------------------");
         const char *dirs[] = { "/bin", "/sbin", "/usr/bin", "/usr/sbin" };
         for (int d = 0; d < 4 && n < 62; d++) {
@@ -371,7 +371,7 @@ static void browser_load(struct app_state *st)
         push_line(lines, &n, 64, "/绝对路径       与上等价，例如 /etc/passwd");
         push_line(lines, &n, 64, "");
         push_line(lines, &n, 64, "点击地址栏后键盘输入，回车或点「前往」打开。");
-        push_line(lines, &n, 64, "后退 / 前进按真实浏览历史移动，上下方向键滚动。");
+        push_line(lines, &n, 64, "后退 / 前进按浏览历史移动，上下方向键滚动。");
     } else {
         const char *path = u;
         if (!strncmp(u, "file:", 5)) path = u + 5;
@@ -402,7 +402,7 @@ static void browser_load(struct app_state *st)
             }
             if (nn > 1) qsort(names, nn, sizeof names[0], cmp_str);
             for (int i = 0; i < nn && n < 64; i++) push_line(lines, &n, 64, "%s", names[i]);
-            if (!nn) push_line(lines, &n, 64, "   （空目录）");
+            if (!nn) push_line(lines, &n, 64, "   空目录");
         } else {
             push_line(lines, &n, 64, "文件：%s   (%lu 字节)", path, (unsigned long)sb.st_size);
             push_line(lines, &n, 64, "--------------------------------------------");
@@ -450,7 +450,7 @@ void app_browser_open(struct app_state *st)
 {
     st->hist_n = 0; st->hist_pos = -1; st->addr_edit = 0;
     browser_nav(st, "about:home");
-    snprintf(st->status, sizeof st->status, "真实读取 /proc 与本地文件 · 点击地址栏输入");
+    snprintf(st->status, sizeof st->status, "点击地址栏输入");
 }
 
 void app_browser_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
@@ -555,7 +555,7 @@ static void gallery_scan(struct app_state *st)
 void app_gallery_open(struct app_state *st)
 {
     gallery_scan(st);
-    snprintf(st->status, sizeof st->status, "真实解码 PPM 像素 · 共 %d 张系统壁纸", st->media_n);
+    snprintf(st->status, sizeof st->status, "共 %d 张壁纸", st->media_n);
 }
 
 void app_gallery_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
@@ -669,7 +669,7 @@ void app_gallery_click(struct aether_win *w, int lx, int ly, int cw, int ch, str
     }
     if (aether_ui_hit(lx, ly, BODY_PAD + bw3 + 8, by, bw3, 36)) {
         st->zoom = (st->zoom + 1) % 3;
-        snprintf(st->status, sizeof st->status, "缩放档位 %d（真实像素重绘）", st->zoom); return;
+        snprintf(st->status, sizeof st->status, "缩放档位 %d", st->zoom); return;
     }
     if (aether_ui_hit(lx, ly, BODY_PAD + 2 * (bw3 + 8), by, bw3, 36)) {
         st->media_sel = (st->media_sel + 1) % st->media_n;
@@ -730,7 +730,7 @@ void app_video_open(struct app_state *st)
     video_scan(st);
     if (st->vid_frames > 0) {
         st->playing = 1; st->play_start_ms = now_ms(); st->play_offset_ms = 0;
-        snprintf(st->status, sizeof st->status, "播放中 · %d 帧 · %d fps（真实逐帧解码）",
+        snprintf(st->status, sizeof st->status, "播放中 · %d 帧 · %d fps",
                  st->vid_frames, st->vid_fps);
     } else snprintf(st->status, sizeof st->status, "系统片源目录为空");
 }
@@ -969,7 +969,7 @@ void app_music_open(struct app_state *st)
         short wave[64];
         wav_info(st->media[0], &st->wav_rate, &st->wav_bits, &st->wav_ch, &st->wav_ms, wave, 64);
         st->playing = 1; st->play_start_ms = now_ms();
-        snprintf(st->status, sizeof st->status, "真实 WAV 解析 · %d Hz / %d bit / %d 声道",
+        snprintf(st->status, sizeof st->status, "%d Hz / %d bit / %d 声道",
                  st->wav_rate, st->wav_bits, st->wav_ch);
     } else snprintf(st->status, sizeof st->status, "音频库目录为空");
 }
@@ -1042,7 +1042,7 @@ void app_music_render(struct aether_win *w, int ox, int oy, int cw, int ch, stru
     slider(ox + BODY_PAD + 48, vy + 2, cw - 2 * BODY_PAD - 48 - 40, st->volume, 100);
     char vb[16]; snprintf(vb, sizeof vb, "%d%%", st->volume);
     aether_ui_label(ox + cw - BODY_PAD - aether_text_width_utf8(vb), vy, vb, C_DIM);
-    hr_small(ox, cw, vy + 24, "客机无音频输出设备，播放为真实波形与进度可视化");
+    hr_small(ox, cw, vy + 24, "波形与进度");
     aether_ui_status(ox, oy, cw, ch, st);
 }
 
@@ -1164,7 +1164,7 @@ void app_clock_open(struct app_state *st)
     st->clock_tab = 0; st->alarm_ring = 0;
     st->timer_set_s = 60; st->timer_left_s = 60; st->timer_run = 0;
     st->sw_run = 0; st->sw_acc_ms = 0; st->sw_lap_n = 0;
-    snprintf(st->status, sizeof st->status, "真实系统时间与单调时钟 · 数字实时推进");
+    snprintf(st->status, sizeof st->status, "系统时间");
 }
 
 static long sw_now_ms(struct app_state *st)
@@ -1216,7 +1216,7 @@ void app_clock_render(struct aether_win *w, int ox, int oy, int cw, int ch, stru
             aether_ui_button(ox + cw - BODY_PAD - 110, ry + 10, 100, 36, "关闭提醒", C_PANEL, C_TEXT);
             by += 64;
         }
-        section(ox, by, "本机闹钟（保存到 /data/aether/alarms.conf）"); by += 24;
+        section(ox, by, "本机闹钟"); by += 24;
         for (int i = 0; i < st->alarm_n; i++) {
             int y = by + i * 52;
             if (y + 46 > oy + ch - STATUS_H - 60) break;
@@ -1480,7 +1480,7 @@ void app_calendar_open(struct app_state *st)
     time_t t = time(NULL); struct tm tm; localtime_r(&t, &tm);
     st->cal_y = tm.tm_year + 1900; st->cal_m = tm.tm_mon + 1; st->cal_sel = tm.tm_mday;
     events_load(st);
-    snprintf(st->status, sizeof st->status, "真实 localtime 月历 · 日程保存到本机");
+    snprintf(st->status, sizeof st->status, "日程保存到本机");
 }
 
 void app_calendar_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
@@ -1543,7 +1543,7 @@ void app_calendar_render(struct aether_win *w, int ox, int oy, int cw, int ch, s
     aether_draw_round_rect(ox + BODY_PAD, iy, cw - 2*BODY_PAD - 84, 32, 8, C_BG, 0xFF);
     aether_draw_border(ox + BODY_PAD, iy, cw - 2*BODY_PAD - 84, 32, C_BORDER, 1);
     if (st->ev_len) aether_ui_label(ox + BODY_PAD + 6, iy + 8, st->ev_input, C_TEXT);
-    else aether_ui_label(ox + BODY_PAD + 6, iy + 8, "输入日程内容（键盘）", C_DIM);
+    else aether_ui_label(ox + BODY_PAD + 6, iy + 8, "输入日程内容", C_DIM);
     aether_ui_button(ox + cw - BODY_PAD - 76, iy, 76, 32, "添加", C_ACCENT, pack_rgb(255,255,255));
     aether_ui_status(ox, oy, cw, ch, st);
 }

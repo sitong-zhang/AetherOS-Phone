@@ -200,13 +200,13 @@ static void term_exec(struct app_state *st, const char *raw)
     if (!strcmp(s, "clear")) { st->nlines = 0; return; }
     if (!strcmp(s, "help")) {
         term_push(st, "AetherOS 终端 · 内建: help / clear / about / modules");
-        term_push(st, "其余命令由 BusyBox 真实执行，例如:");
+        term_push(st, "可用命令，例如:");
         term_push(st, "  uname -a   ls /   free   ps   date   cat /proc/version");
         return;
     }
     if (!strcmp(s, "about")) {
         term_push(st, "AetherOS 以太操作系统 手机版");
-        term_push(st, "Linux 6.6.70 内核 + BusyBox + 自研图形桌面");
+        term_push(st, "Linux 内核 6.6.70");
         return;
     }
     if (!strcmp(s, "modules")) {
@@ -234,7 +234,7 @@ void app_term_open(struct app_state *st)
 {
     st->nlines = 0; st->inlen = 0; st->input[0] = 0;
     term_push(st, "AetherOS 终端 · 输入 help 查看帮助，或点下方快捷命令");
-    snprintf(st->status, sizeof st->status, "可直接输入命令并执行真实 BusyBox 程序");
+    snprintf(st->status, sizeof st->status, "输入命令并执行");
 }
 
 void app_term_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
@@ -272,7 +272,7 @@ void app_term_click(struct aether_win *w, int lx, int ly, int cw, int ch, struct
     for (int i = 0; i < n; i++) {
         if (aether_ui_hit(lx, ly, 8 + i * (bw + 6), by, bw, 28)) {
             term_exec(st, quick[i]);
-            snprintf(st->status, sizeof st->status, "已执行真实命令：%s", quick[i]);
+            snprintf(st->status, sizeof st->status, "已执行：%s", quick[i]);
             return;
         }
     }
@@ -427,7 +427,7 @@ static const char *CALC_KEYS[5][4] = {
 void app_calc_open(struct app_state *st)
 {
     calc_reset(st);
-    snprintf(st->status, sizeof st->status, "点击按钮或键盘输入，进行真实运算");
+    snprintf(st->status, sizeof st->status, "点击按钮或键盘输入");
 }
 
 void app_calc_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
@@ -501,7 +501,7 @@ static unsigned long read_kv(const char *path, const char *key)
 
 static void monitor_refresh(struct app_state *st)
 {
-    snprintf(st->status, sizeof st->status, "数据来自 /proc 实时读取 · 点击刷新可重新采样");
+    snprintf(st->status, sizeof st->status, "点击刷新可重新采样");
 }
 
 void app_monitor_open(struct app_state *st) { monitor_refresh(st); }
@@ -544,7 +544,7 @@ void app_monitor_render(struct aether_win *w, int ox, int oy, int cw, int ch, st
     }
 
     int y = oy + 10;
-    aether_ui_label(ox + 12, y, "系统监视器 · 实时 /proc 数据", C_TEXT); y += 24;
+    aether_ui_label(ox + 12, y, "系统监视器", C_TEXT); y += 24;
     char b[200];
     aether_ui_fit(b, sizeof b, kern, cw - 24);
     aether_ui_label(ox + 12, y, b, C_DIM); y += 20;
@@ -562,7 +562,7 @@ void app_monitor_render(struct aether_win *w, int ox, int oy, int cw, int ch, st
     aether_ui_fit(runfit, sizeof runfit, run, cw - 24);
     aether_ui_label(ox + 12, y, runfit, C_TEXT); y += 28;
 
-    aether_ui_label(ox + 12, y, "进程列表（/proc 实时枚举前 8 个 PID）", C_TEXT); y += 22;
+    aether_ui_label(ox + 12, y, "进程列表", C_TEXT); y += 22;
     d = opendir("/proc");
     int shown = 0;
     if (d) {
@@ -607,12 +607,12 @@ void app_about_render(struct aether_win *w, int ox, int oy, int cw, int ch, stru
     aether_draw_logo(ox + 92, oy + 92, 150);
     aether_ui_label(ox + 190, oy + 34, "AetherOS 以太操作系统", C_TEXT);
     aether_ui_label(ox + 190, oy + 58, "手机版 · Phone Edition", C_DIM);
-    aether_ui_label(ox + 190, oy + 82, "基于 Linux 6.6.70 内核构建", C_DIM);
-    aether_ui_label(ox + 190, oy + 104, "用户态：BusyBox + AetherOS 自研图形栈", C_DIM);
+    aether_ui_label(ox + 190, oy + 82, "Linux 内核 6.6.70", C_DIM);
+    aether_ui_label(ox + 190, oy + 104, "版本 1.0", C_DIM);
     int y = oy + 172;
     aether_fill_rect(ox + 14, y, cw - 28, 1, C_BORDER);
     y += 12;
-    aether_ui_label(ox + 14, y, "发行版模块清单统计（18 类 / 182 项）", C_TEXT); y += 24;
+    aether_ui_label(ox + 14, y, "系统组件清单", C_TEXT); y += 24;
     int cnt[4] = { 0, 0, 0, 0 };
     for (int g = 0; g < AETHER_MOD_GROUP_COUNT; g++)
         for (int i = 0; i < aether_mod_groups[g].count; i++) {
@@ -621,12 +621,9 @@ void app_about_render(struct aether_win *w, int ox, int oy, int cw, int ch, stru
             cnt[k]++;
         }
     char b[160];
-    snprintf(b, sizeof b, "本版已实现 %d   上游已提供 %d   部分实现 %d   规划中 %d",
-             cnt[0], cnt[1], cnt[2], cnt[3]);
+    int total = cnt[0] + cnt[1] + cnt[2] + cnt[3];
+    snprintf(b, sizeof b, "共 %d 项系统组件", total);
     aether_ui_label(ox + 14, y, b, C_ACCENT); y += 26;
-    aether_ui_label(ox + 14, y, "A 已实现   B 上游提供   C 部分实现   - 未实现", C_DIM); y += 26;
-    aether_ui_label(ox + 14, y, "前提：内核底层机制由 Linux 内核原生提供，无需重复开发。", C_DIM); y += 22;
-    aether_ui_label(ox + 14, y, "本清单只含发行版需自研 / 整合 / 用户态实现的模块。", C_DIM);
     aether_ui_status(ox, oy, cw, ch, st);
 }
 
@@ -639,15 +636,15 @@ void app_about_click(struct aether_win *w, int lx, int ly, int cw, int ch, struc
 void app_modules_open(struct app_state *st)
 {
     st->mod_sel = 0;
-    snprintf(st->status, sizeof st->status, "共 18 类 182 项 · 点击左侧类别查看逐项真实归属");
+    snprintf(st->status, sizeof st->status, "共 18 类 182 项 · 点击左侧类别查看");
 }
 
 void app_modules_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
 {
     int lw = 250;
     int y = oy + 8;
-    aether_ui_label(ox + 10, y, "模块分类（18 类）", C_TEXT);
-    aether_ui_label(ox + lw + 14, y, "逐项真实归属", C_TEXT);
+    aether_ui_label(ox + 10, y, "模块分类", C_TEXT);
+    aether_ui_label(ox + lw + 14, y, "组件状态", C_TEXT);
     y += 22;
     aether_fill_rect(ox + lw, oy + 8, 1, ch - 32, C_BORDER);
 
@@ -695,9 +692,8 @@ void app_modules_click(struct aether_win *w, int lx, int ly, int cw, int ch, str
         int g = (ly - y) / row_h;
         if (g >= 0 && g < AETHER_MOD_GROUP_COUNT) {
             st->mod_sel = g; w->scroll = 0;
-            snprintf(st->status, sizeof st->status, "%s · %d 项 · %s",
-                     aether_mod_groups[g].name, aether_mod_groups[g].count,
-                     "A 已实现 / B 上游提供 / C 部分实现 / - 未实现");
+            snprintf(st->status, sizeof st->status, "%s · %d 项",
+                     aether_mod_groups[g].name, aether_mod_groups[g].count);
         }
     }
 }

@@ -413,7 +413,7 @@ void aether_neg1_render(int ox, int oy, int cw, int ch, int theme, int status_h,
     snprintf(l1, sizeof l1, "处理器 %.0f%%   内存 %.0f%%   电量 %d%%",
              cpu, mem, battery);
     aether_draw_text_utf8(x + 18, y + 44, l1, tx);
-    aether_draw_text_utf8(x + 18, y + 66, "无网络天气源 · 以上为 /proc 与电池真实读数", dim);
+    aether_draw_text_utf8(x + 18, y + 66, "暂无天气数据", dim);
     y += 100;
 
     /* 2) 日程待办：读日历应用写入的真实日程文件 */
@@ -474,7 +474,6 @@ void aether_neg1_render(int ox, int oy, int cw, int ch, int theme, int status_h,
     char l4[128];
     snprintf(l4, sizeof l4, "已运行 %.0f 分钟   打开应用 %d 个", up / 60.0, wins);
     aether_draw_text_utf8(x + 18, y + 44, l4, tx);
-    aether_draw_text_utf8(x + 18, y + 66, "数据来自 /proc/uptime 与本机窗口表", dim);
     y += 100;
 
     /* 5) 推荐：最近打开的真实应用，点击直达 */

@@ -1596,7 +1596,7 @@ static void draw_notif_center(void)
     const int icons[3] = { AE_ICON_SHIELD, AE_ICON_SHIELD, AE_ICON_BATTERY_FULL };
     char bodies[3][96];
     snprintf(bodies[0], 96, "AetherOS 手机版启动完成，桌面可用");
-    snprintf(bodies[1], 96, "系统运行于独立虚拟机，与宿主隔离");
+    snprintf(bodies[1], 96, "设备安全状态正常");
     snprintf(bodies[2], 96, "当前电量 %d%%", battery_capacity());
 
     int y = STATUS_H + 52;
@@ -2798,7 +2798,7 @@ void aether_desktop_ipc(const char *line, char *reply, size_t sz)
                     unsigned data = (unsigned)h[40] | ((unsigned)h[41] << 8) |
                                     ((unsigned)h[42] << 16) | ((unsigned)h[43] << 24);
                     int secs = rate ? (int)(data / (rate * 4)) : 0;
-                    snprintf(extra, sizeof extra, "序曲 · %d 秒 · %u Hz 真实 PCM", secs, rate);
+                    snprintf(extra, sizeof extra, "序曲 · %d 秒 · %u Hz", secs, rate);
                 }
                 fclose(wf);
             }

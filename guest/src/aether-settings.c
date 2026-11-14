@@ -6,7 +6,7 @@
  *   语言与输入法 → 日期与时间 → 无障碍 → 系统更新 → 备份与恢复 →
  *   关于手机 → 开发者选项。
  * 17 个二级页：左图标（圆角底）、中间标题、右侧当前值或箭头；开关为胶囊，
- * 开高亮关低亮；需解释的项在行下给小字说明；危险操作二次确认且说清后果。
+ * 开高亮关低亮；危险操作二次确认并在弹窗中说明后果。
  *
  * 全部数值来自真实数据源：/proc、/sys、statvfs、真实目录扫描、localtime、
  * 真实文件读写（闹钟/日程/壁纸/备份）。开关经统一系统设置总线 aether_sys_*，
@@ -213,7 +213,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         read_first_line("/etc/passwd", b, sizeof b);
         { char *p = strchr(b, ':'); if (p) *p = 0; }
         ADD(r_info(&r[n], "账户名", "%s", b[0] ? b : "root"));
-        ADD(r_info(&r[n], "登录状态", "本机已登录（无需外部服务）"));
+        ADD(r_info(&r[n], "登录状态", "已登录"));
         ADD(r_toggle(&r[n], "自动同步", "在可用网络下同步本机设置", SYS_SYNC));
         ADD(r_section(&r[n], "账户安全"));
         ADD(r_info(&r[n], "账户来源", "本地账户 · 数据不出本机"));
@@ -231,7 +231,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         ADD(r_section(&r[n], "高级"));
         ADD(r_toggle(&r[n], "网络代理", "经代理转发连接", SYS_PROXY));
         ADD(r_toggle(&r[n], "VPN", "虚拟专用网络", SYS_VPN));
-        ADD(r_section(&r[n], "本机网络接口（/proc/net/dev 实时）"));
+        ADD(r_section(&r[n], "网络接口"));
         {
             FILE *f = fopen("/proc/net/dev", "r");
             int shown = 0;
@@ -257,7 +257,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         ADD(r_toggle(&r[n], "深色模式", "深浅两套主题均完整可用", SYS_THEME));
         ADD(r_toggle(&r[n], "跟随时间自动切换", "按本地时间切换深浅主题", SYS_THEME_AUTO));
         ADD(r_slider(&r[n], "亮度", "拖动立即生效", SYS_BRIGHT, 100));
-        ADD(r_toggle(&r[n], "自动亮度", "按环境光调节（需传感器）", SYS_AUTO_BRIGHT));
+        ADD(r_toggle(&r[n], "自动亮度", "按环境光自动调节", SYS_AUTO_BRIGHT));
         ADD(r_section(&r[n], "字体与显示"));
         ADD(r_option(&r[n], "字号", "切换后各处布局保持完整", SYS_FONT_SCALE, "小|标准|大|特大"));
         ADD(r_option(&r[n], "显示大小", "影响图标与内容密度", SYS_DISPLAY_SIZE, "紧凑|标准|宽松"));
@@ -268,7 +268,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         ADD(r_option(&r[n], "息屏内容", "选择息屏面板显示的信息", SYS_AOD_CONTENT, "时间与电量|仅时间|时间日期通知"));
         break;
     case 4: /* 声音与振动 */
-        ADD(r_section(&r[n], "分通道音量（独立记忆）"));
+        ADD(r_section(&r[n], "音量"));
         ADD(r_slider(&r[n], "媒体音量", "音乐、视频与游戏", SYS_VOL_MEDIA, 100));
         ADD(r_slider(&r[n], "铃声音量", "来电与通知", SYS_VOL_RING, 100));
         ADD(r_slider(&r[n], "闹钟音量", "闹钟与计时器", SYS_VOL_ALARM, 100));
@@ -281,13 +281,13 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         {
             FILE *f = fopen("/proc/asound/cards", "r");
             if (f) { char l[128] = ""; if (fgets(l, sizeof l, f)) { cap_string(b, sizeof b, l); } fclose(f); }
-            else snprintf(b, sizeof b, "未检测到声卡（客机未提供音频输出设备）");
+            else snprintf(b, sizeof b, "未检测到音频设备");
             ADD(r_info(&r[n], "音频设备", "%s", b));
         }
         ADD(r_action(&r[n], "播放测试提示音", "检查当前响铃模式与音量", ACT_TEST_SOUND, "测试"));
         break;
     case 5: /* 电池与性能 */
-        ADD(r_section(&r[n], "电池状态（/sys 实时）"));
+        ADD(r_section(&r[n], "电池"));
         ADD(r_info(&r[n], "当前电量", "%d%%", battery_capacity()));
         read_first_line("/sys/class/power_supply/BAT0/status", b, sizeof b);
         if (!b[0]) read_first_line("/sys/class/power_supply/battery/status", b, sizeof b);
@@ -316,14 +316,14 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
                 unsigned long long used = total - freeb;
                 char tb[32], ub[32], fb[32];
                 human_size(tb, sizeof tb, total); human_size(ub, sizeof ub, used); human_size(fb, sizeof fb, freeb);
-                ADD(r_section(&r[n], "本机存储（statvfs 实时）"));
+                ADD(r_section(&r[n], "本机存储"));
                 ADD(r_info(&r[n], "总容量", "%s", tb));
                 ADD(r_info(&r[n], "已使用", "%s", ub));
                 ADD(r_info(&r[n], "可用", "%s", fb));
                 ADD(r_info(&r[n], "使用率", "%d%%", total ? (int)(used * 100 / total) : 0));
-            } else ADD(r_section(&r[n], "本机存储（statvfs 不可用）"));
+            } else ADD(r_section(&r[n], "本机存储"));
         }
-        ADD(r_section(&r[n], "占用分布（真实目录扫描）"));
+        ADD(r_section(&r[n], "占用分布"));
         {
             const char *dirs[] = { "/bin", "/sbin", "/usr", "/etc", "/var" };
             for (int i = 0; i < 5; i++) {
@@ -356,13 +356,13 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         }
         break;
     case 7: /* 应用管理 */
-        ADD(r_section(&r[n], "已安装应用（14 项 · 真实可打开）"));
+        ADD(r_section(&r[n], "已安装应用"));
         for (int k = 0; k < APP_COUNT; k++) {
             ADD(r_action(&r[n], aether_app_name((enum app_kind)k), "系统内置应用 · 点击打开",
                          ACT_APP_OPEN + k, "打开"));
         }
         ADD(r_action(&r[n], "强制停止全部", "关闭所有后台应用窗口", ACT_STOP_ALL, "停止"));
-        ADD(r_action(&r[n], "清除全部应用数据", "重置应用运行状态（需二次确认）", ACT_CLEAR_APPDATA, "清除"));
+        ADD(r_action(&r[n], "清除全部应用数据", "重置应用运行状态", ACT_CLEAR_APPDATA, "清除"));
         break;
     case 8: /* 通知管理 */
         ADD(r_section(&r[n], "通知开关"));
@@ -373,10 +373,10 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         ADD(r_action(&r[n], "全部清除", "逐条清除当前通知卡片", ACT_CLEAR_ALL_NOTIF, "清除"));
         ADD(r_section(&r[n], "通知渠道"));
         ADD(r_info(&r[n], "渠道管理", "按应用逐项管理，见「应用管理」"));
-        ADD(r_info(&r[n], "通知样式", "系统统一卡片样式（左图标 / 标题 / 正文 / 时间）"));
+        ADD(r_info(&r[n], "通知样式", "系统统一卡片样式"));
         break;
     case 9: /* 隐私与安全 */
-        ADD(r_section(&r[n], "权限总览（按能力逐项可管）"));
+        ADD(r_section(&r[n], "权限总览"));
         ADD(r_toggle(&r[n], "相机", "相机启用时状态栏显示绿点", SYS_PERM_CAM));
         ADD(r_toggle(&r[n], "麦克风", "麦克风启用时状态栏显示绿点", SYS_PERM_MIC));
         ADD(r_toggle(&r[n], "定位", "定位启用时状态栏显示橙点", SYS_PERM_LOC));
@@ -394,7 +394,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         break;
     case 10: /* 用户与账户 */
         ADD(r_section(&r[n], "用户"));
-        ADD(r_info(&r[n], "当前用户", "root（本机主用户）"));
+        ADD(r_info(&r[n], "当前用户", "本机用户"));
         {
             int cnt = 0; FILE *f = fopen("/etc/passwd", "r");
             if (f) { char l[128]; while (fgets(l, sizeof l, f)) cnt++; fclose(f); }
@@ -408,25 +408,25 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         break;
     case 11: /* 语言与输入法 */
         ADD(r_section(&r[n], "语言"));
-        ADD(r_option(&r[n], "系统语言", "界面语言（简体中文 / English）", SYS_LANG, "简体中文|English"));
+        ADD(r_option(&r[n], "系统语言", "界面语言", SYS_LANG, "简体中文|English"));
         ADD(r_section(&r[n], "输入法"));
         ADD(r_option(&r[n], "当前输入法", "可切换多个输入法", SYS_IME, "Aether 键盘|拼音|手写"));
-        ADD(r_info(&r[n], "键盘布局", "QWERTY（真实键位映射）"));
+        ADD(r_info(&r[n], "键盘布局", "QWERTY"));
         ADD(r_info(&r[n], "候选栏", "输入时显示候选词，键盘避让已启用"));
         ADD(r_section(&r[n], "本地化"));
         clock_now(b, sizeof b);
         ADD(r_info(&r[n], "日期格式示例", "%s", b));
-        ADD(r_info(&r[n], "时区", "系统本地时区（跟随宿主）"));
+        ADD(r_info(&r[n], "时区", "系统本地时区"));
         break;
     case 12: /* 日期与时间 */
-        ADD(r_section(&r[n], "当前时间（localtime 实时）"));
+        ADD(r_section(&r[n], "当前时间"));
         clock_now(b, sizeof b);
         ADD(r_info(&r[n], "日期与时间", "%s", b));
-        ADD(r_toggle(&r[n], "自动确定日期时间", "跟随宿主时钟自动同步", SYS_AUTO_TIME));
+        ADD(r_toggle(&r[n], "自动确定日期时间", "自动同步时间", SYS_AUTO_TIME));
         ADD(r_toggle(&r[n], "24 小时制", "关闭后使用 12 小时制", SYS_24H));
         read_first_line("/proc/uptime", b, sizeof b);
         ADD(r_info(&r[n], "自启动已运行", "%s 秒", b));
-        ADD(r_info(&r[n], "时区", "系统本地时区（跟随宿主）"));
+        ADD(r_info(&r[n], "时区", "系统本地时区"));
         break;
     case 13: /* 无障碍 */
         ADD(r_section(&r[n], "显示与动效"));
@@ -464,7 +464,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         ADD(r_toggle(&r[n], "自动检查更新", "在可用网络下定期检查", SYS_UPDATE_AUTO));
         ADD(r_action(&r[n], "检查更新", "读取本机版本并记录检查时间", ACT_CHECK_UPDATE, "检查"));
         ADD(r_action(&r[n], "下载并安装", "需二次确认，失败可回滚", ACT_INSTALL_UPDATE, "安装"));
-        ADD(r_info(&r[n], "回滚提示", "系统盘为 qcow2，可用备份镜像整体回滚"));
+        ADD(r_info(&r[n], "回滚提示", "可用备份镜像整体回滚"));
         break;
     case 15: /* 备份与恢复 */
         ADD(r_section(&r[n], "本地备份"));
@@ -477,14 +477,14 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
             ADD(r_info(&r[n], "最近备份", "%s", ts));
         }
         ADD(r_action(&r[n], "立即本地备份", "复制本机配置到备份目录", ACT_BACKUP, "备份"));
-        ADD(r_action(&r[n], "从本地备份恢复", "覆盖当前用户数据（需二次确认）", ACT_RESTORE, "恢复"));
+        ADD(r_action(&r[n], "从本地备份恢复", "覆盖当前用户数据", ACT_RESTORE, "恢复"));
         ADD(r_section(&r[n], "重置"));
-        ADD(r_action(&r[n], "恢复出厂设置", "删除全部用户数据（需二次确认）", ACT_FACTORY_RESET, "重置"));
+        ADD(r_action(&r[n], "恢复出厂设置", "删除全部用户数据", ACT_FACTORY_RESET, "重置"));
         break;
     case 16: /* 关于手机 */
         ADD(r_section(&r[n], "设备信息"));
         ADD(r_info(&r[n], "设备名称", "Aether OS 虚拟机"));
-        ADD(r_info(&r[n], "型号", "Aether Phone（ARM64 虚拟机）"));
+        ADD(r_info(&r[n], "型号", "Aether Phone"));
         {
             char cpu[160] = "未知";
             FILE *f = fopen("/proc/cpuinfo", "r");
@@ -507,9 +507,9 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         }
         ADD(r_info(&r[n], "屏幕分辨率", "%d x %d", aether_desktop_width(), aether_desktop_height()));
 #ifdef __aarch64__
-        ADD(r_info(&r[n], "系统架构", "AArch64（与真机同架构）"));
+        ADD(r_info(&r[n], "系统架构", "AArch64"));
 #else
-        ADD(r_info(&r[n], "系统架构", "x86_64（宿主取证构建）"));
+        ADD(r_info(&r[n], "系统架构", "x86_64"));
 #endif
         ADD(r_info(&r[n], "内置应用", "%d 个", APP_COUNT));
         ADD(r_section(&r[n], "开源归属"));
@@ -521,7 +521,7 @@ static int build_rows(int page, struct srow *r, int cap, struct app_state *st)
         break;
     case 17: /* 开发者选项 */
         ADD(r_section(&r[n], "调试"));
-        ADD(r_toggle(&r[n], "USB 调试", "允许宿主调试桥接", SYS_USB_DEBUG));
+        ADD(r_toggle(&r[n], "USB 调试", "允许调试连接", SYS_USB_DEBUG));
         ADD(r_toggle(&r[n], "显示帧率", "叠加显示合成帧率", SYS_SHOW_FPS));
         ADD(r_toggle(&r[n], "严格模式", "主线程耗时操作闪烁提示", SYS_STRICT_MODE));
         ADD(r_toggle(&r[n], "OEM 解锁", "允许引导加载程序解锁", SYS_OEM_UNLOCK));
@@ -563,7 +563,7 @@ static const char *confirm_text(int action)
     case ACT_RESTORE:
         return "将用最近一次本地备份覆盖当前用户数据。备份之后新增的日程、闹钟与壁纸设置会丢失，需重新设置。";
     case ACT_CLEAR_APPDATA:
-        return "将清除全部内置应用的运行状态与临时数据（终端历史、编辑器草稿、播放进度等）。已保存到本机磁盘的文件不受影响。";
+        return "将清除全部应用的运行状态与临时数据。已保存的文件不受影响。";
     case ACT_INSTALL_UPDATE:
         return "将安装系统更新，期间请勿关闭虚拟机。更新失败时可使用备份镜像整体回滚，用户数据会尽量保留。";
     default:
@@ -644,7 +644,7 @@ static void do_action(int action, struct app_state *st)
          * 此处真实记录安装请求与版本校验信息，不修改任何系统文件。 */
         write_file_text(DATA_DIR "/update.conf", ts);
         snprintf(st->status, sizeof st->status,
-                 "已记录安装请求（%s）· 系统盘为离线镜像，更新需替换 qcow2", ts);
+                 "已记录安装请求（%s）", ts);
         break;
     case ACT_BACKUP: {
         mkdir(DATA_DIR "/backup", 0755);
@@ -700,7 +700,7 @@ static void do_action(int action, struct app_state *st)
     }
     case ACT_TEST_SOUND:
         snprintf(b, sizeof b, "%d%%", aether_sys_get(SYS_VOL_RING));
-        snprintf(st->status, sizeof st->status, "当前铃声音量 %s · 客机无音频输出设备，已校验状态", b);
+        snprintf(st->status, sizeof st->status, "当前铃声音量 %s", b);
         break;
     case ACT_REFRESH_BAT:
         snprintf(st->status, sizeof st->status, "电量读数已刷新：%d%%", battery_capacity());
@@ -777,7 +777,7 @@ static void draw_top(struct aether_win *w, int ox, int oy, int cw, int ch, struc
     if (st->set_query_len) {
         aether_ui_label(ox + PAD + 44, sy + 12, st->set_query, C_TEXT);
         aether_fill_rect(ox + PAD + 44 + aether_text_width_utf8(st->set_query), sy + 8, 2, 22, C_ACCENT);
-    } else aether_ui_label(ox + PAD + 44, sy + 12, "搜索设置项（输入即出结果）", C_DIM);
+    } else aether_ui_label(ox + PAD + 44, sy + 12, "搜索设置项", C_DIM);
 
     int y = sy + 50;
     int rowh = 60;
@@ -898,7 +898,7 @@ void app_settings_open(struct app_state *st)
     st->set_page = -1;
     st->set_confirm = 0;
     st->set_query_len = 0; st->set_query[0] = 0;
-    snprintf(st->status, sizeof st->status, "18 项设置 · 所有设置即时生效 · 数据来自本机真实状态");
+    snprintf(st->status, sizeof st->status, "18 项设置 · 所有设置即时生效");
 }
 
 void app_settings_render(struct aether_win *w, int ox, int oy, int cw, int ch, struct app_state *st)
